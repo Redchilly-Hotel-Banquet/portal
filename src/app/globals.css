@@ -1,0 +1,116 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Red Chilly design tokens. Ivory paper, ink text, a deep chilli red for primary
+ * actions and a restrained brass for accents. Values are HSL channels so Tailwind
+ * can apply alpha (bg-primary/10).
+ */
+@layer base {
+  :root {
+    --background: 40 33% 97%;
+    --foreground: 24 22% 11%;
+    --surface: 40 28% 94%;
+    --card: 0 0% 100%;
+    --card-foreground: 24 22% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 24 22% 11%;
+    --primary: 4 68% 35%;
+    --primary-foreground: 40 40% 98%;
+    --secondary: 36 22% 91%;
+    --secondary-foreground: 24 22% 16%;
+    --muted: 38 20% 92%;
+    --muted-foreground: 24 8% 38%;
+    --accent: 38 30% 89%;
+    --accent-foreground: 24 22% 14%;
+    --brass: 38 52% 42%;
+    --brass-foreground: 40 40% 98%;
+    --success: 152 48% 28%;
+    --success-foreground: 0 0% 100%;
+    --warning: 34 82% 34%;
+    --warning-foreground: 0 0% 100%;
+    --destructive: 0 70% 40%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 36 18% 85%;
+    --input: 36 18% 82%;
+    --ring: 4 68% 35%;
+    --shadow: 24 30% 12%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 24 16% 8%;
+    --foreground: 40 25% 94%;
+    --surface: 24 14% 11%;
+    --card: 24 14% 12%;
+    --card-foreground: 40 25% 94%;
+    --popover: 24 14% 12%;
+    --popover-foreground: 40 25% 94%;
+    --primary: 4 72% 55%;
+    --primary-foreground: 24 22% 8%;
+    --secondary: 24 10% 17%;
+    --secondary-foreground: 40 25% 92%;
+    --muted: 24 10% 16%;
+    --muted-foreground: 36 10% 68%;
+    --accent: 24 10% 19%;
+    --accent-foreground: 40 25% 94%;
+    --brass: 38 56% 58%;
+    --brass-foreground: 24 22% 8%;
+    --success: 152 44% 46%;
+    --success-foreground: 24 22% 8%;
+    --warning: 38 86% 56%;
+    --warning-foreground: 24 22% 8%;
+    --destructive: 0 68% 58%;
+    --destructive-foreground: 24 22% 8%;
+    --border: 24 10% 20%;
+    --input: 24 10% 24%;
+    --ring: 4 72% 55%;
+    --shadow: 0 0% 0%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-background font-sans text-foreground antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+
+  h1, h2, h3, .font-display {
+    font-family: var(--font-display), ui-serif, Georgia, serif;
+    letter-spacing: -0.01em;
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.18);
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+}
+
+@layer components {
+  .eyebrow {
+    @apply text-xs font-semibold uppercase tracking-[0.18em] text-brass;
+  }
+  .page-container {
+    @apply mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8;
+  }
+  .hairline {
+    @apply h-px w-full bg-border;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
