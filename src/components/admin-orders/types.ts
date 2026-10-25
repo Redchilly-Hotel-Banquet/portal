@@ -37,6 +37,8 @@ export type AdminOrder = {
   status: string;
   total: number | string;
   special_instructions?: string | null;
+  /** "PHONE" when staff entered it for a guest who ordered by phone. */
+  source?: string | null;
   created_at: string;
   rooms_tables?: OrderLocation | null;
   order_items?: OrderLine[];

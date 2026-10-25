@@ -12,6 +12,12 @@ const schema = z.object({
   ADMIN_GOOGLE_EMAILS: z.string().optional(),
   APP_URL: z.string().optional(),
   PROFILE_ENCRYPTION_KEY: z.string().min(16).optional(),
+  R2_ACCOUNT_ID: z.string().optional(),
+  R2_ACCESS_KEY_ID: z.string().optional(),
+  R2_SECRET_ACCESS_KEY: z.string().optional(),
+  R2_BUCKET: z.string().optional(),
+  /** Public base URL of the bucket's custom domain; only Menu/ images are ever linked through it. */
+  MEDIA_BASE_URL: z.string().optional(),
 });
 
 export type Env = z.infer<typeof schema>;

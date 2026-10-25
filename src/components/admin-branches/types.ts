@@ -1,3 +1,5 @@
+export type WifiFloorRow = { floor: string; wifi_name: string; wifi_password: string };
+
 export type Branch = {
   id: string;
   location_key: string;
@@ -6,6 +8,10 @@ export type Branch = {
   contact_number: string;
   contact_email: string;
   google_maps_url: string;
+  wifi_name: string;
+  wifi_password: string;
+  welcome_message: string;
+  wifi_floors: WifiFloorRow[];
   sort_order: number | null;
   is_active: boolean;
 };
@@ -25,6 +31,12 @@ export function toBranch(raw: Record<string, unknown>): Branch | null {
     contact_number: str(raw.contact_number),
     contact_email: str(raw.contact_email),
     google_maps_url: str(raw.google_maps_url),
+    wifi_name: str(raw.wifi_name),
+    wifi_password: str(raw.wifi_password),
+    welcome_message: str(raw.welcome_message),
+    wifi_floors: Array.isArray(raw.wifi_floors)
+      ? (raw.wifi_floors as Record<string, unknown>[]).map((row) => ({ floor: str(row?.floor), wifi_name: str(row?.wifi_name), wifi_password: str(row?.wifi_password) }))
+      : [],
     sort_order: Number.isFinite(order) ? order : null,
     is_active: raw.is_active !== false,
   };

@@ -97,6 +97,8 @@ export function BookingsConsole() {
 
       <BookingDetailSheet
         booking={selected}
+        welcome={bookingsQuery.data?.welcome}
+        roomLevels={bookingsQuery.data?.room_levels}
         onClose={() => setSelectedId(null)}
         onManageCheckin={setCheckinTarget}
         onOpenInvoice={setInvoice}

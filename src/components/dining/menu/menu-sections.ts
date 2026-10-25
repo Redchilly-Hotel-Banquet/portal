@@ -35,6 +35,9 @@ export function buildSections(items: MenuItem[], categories: MenuCategory[]): Me
     const name = sectionName(item, categoryById);
     const key = normalizeText(name);
     const group = groups.get(key) ?? { name, items: [] };
+    // Branches share one menu, so browsing "All branches" would list each dish once per branch.
+    const dishKey = `${normalizeText(item.name ?? "")}|${item.price ?? ""}`;
+    if (group.items.some((existing) => `${normalizeText(existing.name ?? "")}|${existing.price ?? ""}` === dishKey)) continue;
     group.items.push(item);
     groups.set(key, group);
   }

@@ -9,6 +9,10 @@ export type OutletAnalytics = {
   active_bookings: number;
   total_rooms: number;
   total_tables: number;
+  /** Received at check-out, by payment source. */
+  payments_by_mode?: Record<string, number>;
+  payment_counts?: Record<string, number>;
+  gst_collected?: number;
 };
 
 export type AnalyticsTotals = {

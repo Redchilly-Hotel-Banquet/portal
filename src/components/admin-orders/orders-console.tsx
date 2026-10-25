@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BellOff, Inbox, RefreshCw, Volume2 } from "lucide-react";
+import { BellOff, Inbox, Phone, RefreshCw, Volume2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -14,6 +14,7 @@ import { statusLabel } from "@/components/admin/status-badge";
 import { ApiError, apiPost } from "@/lib/apiClient";
 import { cn } from "@/lib/utils";
 import { AlarmDialog } from "./alarm-dialog";
+import { PhoneOrderDialog } from "./phone-order-dialog";
 import { OrderCard } from "./order-card";
 import { useOrderAlarm } from "./use-order-alarm";
 import {
@@ -36,6 +37,7 @@ const sortedUnique = (values: Iterable<string>) =>
 export function OrdersConsole() {
   const queryClient = useQueryClient();
   const audioRef = useRef<HTMLAudioElement>(null);
+  const [phoneOrderOpen, setPhoneOrderOpen] = useState(false);
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ["admin-orders"],
@@ -168,6 +170,9 @@ export function OrdersConsole() {
       description="Today's orders, refreshed every 10 seconds."
       actions={
         <>
+          <Button size="sm" onClick={() => setPhoneOrderOpen(true)}>
+            <Phone aria-hidden strokeWidth={1.75} /> Phone order
+          </Button>
           {alarm.audioEnabled ? (
             <span className="inline-flex items-center gap-1.5 text-xs text-success">
               <Volume2 className="h-4 w-4" strokeWidth={1.75} aria-hidden /> Sound alerts on
@@ -308,6 +313,7 @@ export function OrdersConsole() {
           </>
         )}
       </div>
+      <PhoneOrderDialog open={phoneOrderOpen} onOpenChange={setPhoneOrderOpen} />
     </AdminShell>
   );
 }

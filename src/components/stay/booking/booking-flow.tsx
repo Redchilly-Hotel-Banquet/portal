@@ -288,6 +288,7 @@ export function BookingFlow() {
           finalTotal={finalTotal}
           isStaff={isStaff}
           hasOverride={hasOverride}
+          roomsChosen={step >= 1}
         />
       </div>
     </div>

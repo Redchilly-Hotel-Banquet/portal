@@ -11,9 +11,11 @@ interface BookingSummaryProps {
   finalTotal: number;
   isStaff: boolean;
   hasOverride: boolean;
+  /** False on the first step: a room is pre-selected by default there, but the guest has not chosen one yet. */
+  roomsChosen: boolean;
 }
 
-export function BookingSummary({ state, nights, pricing, finalTotal, isStaff, hasOverride }: BookingSummaryProps) {
+export function BookingSummary({ state, nights, pricing, finalTotal, isStaff, hasOverride, roomsChosen }: BookingSummaryProps) {
   const { from, to } = state.range ?? {};
 
   return (
@@ -46,7 +48,7 @@ export function BookingSummary({ state, nights, pricing, finalTotal, isStaff, ha
 
       <div className="mt-5 border-t border-border pt-4">
         <p className="text-xs uppercase tracking-wider text-muted-foreground">Rooms</p>
-        {pricing.chosen.length === 0 ? (
+        {!roomsChosen || pricing.chosen.length === 0 ? (
           <p className="mt-2 text-sm text-muted-foreground">No rooms selected yet.</p>
         ) : (
           <ul className="mt-2 space-y-2 text-sm">
@@ -65,6 +67,7 @@ export function BookingSummary({ state, nights, pricing, finalTotal, isStaff, ha
         )}
       </div>
 
+      {roomsChosen && (
       <div className="mt-5 border-t border-border pt-4">
         {isStaff && hasOverride && (
           <div className="mb-2 flex justify-between text-sm text-muted-foreground">
@@ -78,6 +81,7 @@ export function BookingSummary({ state, nights, pricing, finalTotal, isStaff, ha
         </div>
         <p className="mt-2 text-xs text-muted-foreground">Taxes and final allocation are confirmed by the hotel.</p>
       </div>
+      )}
     </aside>
   );
 }

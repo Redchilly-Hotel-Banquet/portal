@@ -45,6 +45,7 @@ function GuestCard({
   const config = DOCUMENT_TYPES.find((d) => d.value === guest.documentType) ?? DOCUMENT_TYPES[0];
   const nameErr = errors[`${guest.key}.name`];
   const numErr = errors[`${guest.key}.number`];
+  const phoneErr = errors[`${guest.key}.phone`];
   const sigErr = errors[`${guest.key}.signature`];
   const imgErr = errors[`${guest.key}.image`];
   const id = guest.key;
@@ -81,6 +82,26 @@ function GuestCard({
             onChange={(e) => onUpdate({ fullName: e.target.value })}
             aria-invalid={!!nameErr}
             aria-describedby={fieldDescribedBy(`${id}-name`, !!nameErr, false)}
+          />
+        </Field>
+        <Field
+          id={`${id}-phone`}
+          label="Mobile number"
+          optional
+          hint={index === 0 ? "Optional. We send your room and Wi-Fi details here." : "Optional. We can send this guest the room and Wi-Fi details."}
+          error={phoneErr}
+          className="sm:col-span-3"
+        >
+          <Input
+            id={`${id}-phone`}
+            type="tel"
+            inputMode="tel"
+            autoComplete={index === 0 ? "tel" : "off"}
+            placeholder="10-digit mobile number"
+            value={guest.phone}
+            onChange={(e) => onUpdate({ phone: e.target.value })}
+            aria-invalid={!!phoneErr}
+            aria-describedby={fieldDescribedBy(`${id}-phone`, !!phoneErr, true)}
           />
         </Field>
         <Field id={`${id}-type`} label="Document" required className="sm:col-span-1">

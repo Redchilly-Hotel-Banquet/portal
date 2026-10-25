@@ -1,5 +1,5 @@
 import { ApiError, apiPost } from "@/lib/apiClient";
-import { getGuestSession, saveGuestSession, type GuestSession } from "@/lib/guestSession";
+import { saveGuestSession, type GuestSession } from "@/lib/guestSession";
 import { locationLabel } from "../utils";
 
 export type LocationKind = "ROOM" | "TABLE";
@@ -8,6 +8,8 @@ export type LocationRequest = {
   code: string;
   type: LocationKind;
   outletId: string;
+  /** 6-digit check-in ID. Required for rooms. */
+  checkinId?: string;
 };
 
 type ValidateResponse =
@@ -22,13 +24,14 @@ type ValidateResponse =
         check_out_date?: string;
         guest_name?: string;
       } | null;
+      requiresCheckinId?: boolean;
     }
   | { valid: false; message?: string }
   | { outlet: Array<{ id: string; location_key?: string }> };
 
 export type LocationResult =
   | { ok: true; session: GuestSession; welcome: string; warning?: string }
-  | { ok: false; message: string };
+  | { ok: false; message: string; /** The room exists; the guest still has to enter their check-in ID. */ needsCheckinId?: boolean };
 
 /** Query parameters a printed QR code may carry: ?room=101 or ?table=A1, plus &outlet=<key>. */
 export function readLocationParams(params: { get(name: string): string | null }) {
@@ -56,9 +59,9 @@ export function parseScannedText(text: string): { code: string; type: LocationKi
 }
 
 /** Validates a room/table with the server and, when valid, stores the guest session. */
-export async function resolveLocation({ code, type, outletId }: LocationRequest): Promise<LocationResult> {
+export async function resolveLocation({ code, type, outletId, checkinId }: LocationRequest): Promise<LocationResult> {
   try {
-    const data = await apiPost<ValidateResponse, LocationRequest>("/public/locations/validate", { code, type, outletId });
+    const data = await apiPost<ValidateResponse, LocationRequest>("/public/locations/validate", { code, type, outletId, checkinId }, "user");
 
     if (!("valid" in data) || !data.valid) {
       return { ok: false, message: ("message" in data && data.message) || "We could not find that room or table." };
@@ -66,10 +69,12 @@ export async function resolveLocation({ code, type, outletId }: LocationRequest)
 
     const { location, outlet } = data;
     const resolvedOutletId = location.outlet_id ?? outletId;
-
-    const existing = getGuestSession();
-    const reuse = Boolean(existing && existing.outletId === resolvedOutletId && existing.id === location.id);
     const booking = type === "ROOM" ? data.booking ?? null : null;
+
+    // A room is only opened for someone who has entered the stay's check-in ID.
+    if (type === "ROOM" && !booking) {
+      return { ok: false, needsCheckinId: true, message: "Enter the 6-digit check-in ID you received at reception to order to your room." };
+    }
 
     const session: GuestSession = {
       id: location.id,
@@ -78,10 +83,11 @@ export async function resolveLocation({ code, type, outletId }: LocationRequest)
       outletId: resolvedOutletId,
       outletName: outlet?.name ?? outlet?.id ?? resolvedOutletId,
       assignedAt: new Date().toISOString(),
-      bookingId: booking?.id || (reuse ? existing?.bookingId : undefined),
-      bookingCode: booking?.booking_code || (reuse ? existing?.bookingCode : undefined),
-      bookingStatus: booking?.status || (reuse ? existing?.bookingStatus : undefined),
-      checkOutDate: booking?.check_out_date || (reuse ? existing?.checkOutDate : undefined),
+      bookingId: booking?.id,
+      bookingCode: booking?.booking_code,
+      bookingStatus: booking?.status,
+      checkOutDate: booking?.check_out_date,
+      checkinId: booking ? checkinId : undefined,
     };
     saveGuestSession(session);
 
@@ -90,7 +96,7 @@ export async function resolveLocation({ code, type, outletId }: LocationRequest)
       ok: true,
       session,
       welcome: booking?.guest_name ? `Welcome, ${booking.guest_name}. ${place} is confirmed.` : `${place} is confirmed.`,
-      warning: type === "ROOM" && !booking && !reuse ? "No active booking found for this room. Please check with the front desk." : undefined,
+      warning: undefined,
     };
   } catch (error) {
     return { ok: false, message: error instanceof ApiError || error instanceof Error ? error.message : "Unable to validate location" };

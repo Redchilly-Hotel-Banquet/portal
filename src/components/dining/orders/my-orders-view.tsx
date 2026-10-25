@@ -37,7 +37,7 @@ export function MyOrdersView() {
     enabled: Boolean(bookingId),
     refetchInterval: 10_000,
     refetchOnWindowFocus: true,
-    queryFn: () => apiPost<{ orders: OrderRecord[] }, { bookingId: string }>("/public/orders/guest", { bookingId: bookingId as string }),
+    queryFn: () => apiPost<{ orders: OrderRecord[] }, { bookingId: string; checkinId?: string }>("/public/orders/guest", { bookingId: bookingId as string, checkinId: session?.checkinId }, "user"),
   });
   const orders = query.data?.orders ?? [];
 

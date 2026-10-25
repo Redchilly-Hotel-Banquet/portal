@@ -1,8 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { DoorOpen, LogOut, Receipt } from "lucide-react";
-import { ConfirmDialog } from "@/components/admin/confirm-dialog";
+import { DoorOpen, LogOut, Phone, Receipt } from "lucide-react";
 import { formatDate, formatINR } from "@/components/admin/format";
 import { StatusBadge } from "@/components/admin/status-badge";
 import { Button } from "@/components/ui/button";
@@ -10,12 +9,19 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { BookingCharges } from "./booking-charges";
 import { BookingTimeline } from "./booking-timeline";
-import { BOOKING_STATUSES, type BillingSummary, type Booking } from "./types";
+import { StayMessages } from "./stay-messages";
+import { CheckoutDialog } from "./checkout-dialog";
+import type { PaymentLine } from "@/lib/payment-modes";
+import { PhoneOrderDialog } from "@/components/admin-orders/phone-order-dialog";
+import { BOOKING_STATUSES, type BillingSummary, type Booking, type WelcomeInfo } from "./types";
 import { useBillingQuery, useCheckout, useUpdateStatus } from "./use-bookings";
 import { errorMessage, outletLabel, roomLabel, roomNightlyRate, stayNights } from "./utils";
 
 type Props = {
   booking: Booking | null;
+  /** Wi-Fi and welcome text per branch, from the bookings list. */
+  welcome?: Record<string, WelcomeInfo>;
+  roomLevels?: Record<string, string>;
   onClose: () => void;
   onManageCheckin: (booking: Booking) => void;
   onOpenInvoice: (summary: BillingSummary) => void;
@@ -39,18 +45,33 @@ function Detail({ label, children }: { label: string; children: React.ReactNode 
   );
 }
 
-export function BookingDetailSheet({ booking, onClose, onManageCheckin, onOpenInvoice }: Props) {
+export function BookingDetailSheet({ booking, welcome, roomLevels, onClose, onManageCheckin, onOpenInvoice }: Props) {
   const [confirmCheckout, setConfirmCheckout] = useState(false);
+  const [phoneOrderOpen, setPhoneOrderOpen] = useState(false);
+  const [openingInvoice, setOpeningInvoice] = useState(false);
   const billingQuery = useBillingQuery(booking?.id ?? null);
   const statusMutation = useUpdateStatus();
   const checkout = useCheckout();
 
-  const runCheckout = async () => {
+  /** Always reads the bill again, so the invoice reflects food added a moment ago. */
+  const openInvoice = async () => {
+    setOpeningInvoice(true);
+    try {
+      const fresh = await billingQuery.refetch();
+      if (fresh.data) onOpenInvoice(fresh.data);
+    } finally {
+      setOpeningInvoice(false);
+    }
+  };
+
+  const runCheckout = async (payments: PaymentLine[]) => {
     if (!booking) return;
     try {
-      await checkout.mutateAsync(booking.id);
-    } finally {
+      await checkout.mutateAsync({ bookingId: booking.id, payments });
       setConfirmCheckout(false);
+    } catch {
+      // The error is shown by the mutation; keep the dialog open so the amounts can be corrected.
+      void billingQuery.refetch();
     }
   };
 
@@ -86,10 +107,16 @@ export function BookingDetailSheet({ booking, onClose, onManageCheckin, onOpenIn
                   <DoorOpen className="mr-2 h-4 w-4" strokeWidth={1.75} aria-hidden />
                   Check-in
                 </Button>
-                <Button variant="outline" onClick={() => billingQuery.data && onOpenInvoice(billingQuery.data)} disabled={!billingQuery.data}>
+                <Button variant="outline" onClick={() => void openInvoice()} disabled={!billingQuery.data || openingInvoice}>
                   <Receipt className="mr-2 h-4 w-4" strokeWidth={1.75} aria-hidden />
                   Invoice
                 </Button>
+                {booking.status === "CHECKED_IN" ? (
+                  <Button variant="outline" onClick={() => setPhoneOrderOpen(true)}>
+                    <Phone className="mr-2 h-4 w-4" strokeWidth={1.75} aria-hidden />
+                    Add food order
+                  </Button>
+                ) : null}
                 {booking.status === "CHECKED_IN" ? (
                   <Button onClick={() => setConfirmCheckout(true)}>
                     <LogOut className="mr-2 h-4 w-4" strokeWidth={1.75} aria-hidden />
@@ -105,6 +132,10 @@ export function BookingDetailSheet({ booking, onClose, onManageCheckin, onOpenIn
                   <Detail label="Guests">{booking.number_of_guests ?? "-"}</Detail>
                   <Detail label="Special requests">{booking.special_requests || "None"}</Detail>
                 </dl>
+              </Section>
+
+              <Section title="Check-in ID and welcome">
+                <StayMessages booking={booking} welcome={booking.outlet_id ? welcome?.[booking.outlet_id] : undefined} roomLevels={roomLevels} />
               </Section>
 
               <Section title="Stay">
@@ -161,13 +192,28 @@ export function BookingDetailSheet({ booking, onClose, onManageCheckin, onOpenIn
         </SheetContent>
       </Sheet>
 
-      <ConfirmDialog
+      {booking ? (
+        <PhoneOrderDialog
+          open={phoneOrderOpen}
+          onOpenChange={setPhoneOrderOpen}
+          defaultDelivered
+          stay={{
+            bookingId: booking.id,
+            bookingCode: booking.booking_code,
+            guestName: booking.guest_name ?? "Guest",
+            outletId: booking.outlet_id ?? "",
+            rooms: (booking.checkin_details?.assigned_rooms ?? []).map((room) => ({ id: room.id, code: room.code ?? "" })),
+          }}
+        />
+      ) : null}
+
+      <CheckoutDialog
         open={confirmCheckout}
         onOpenChange={setConfirmCheckout}
-        title="Complete checkout?"
-        description="The booking is marked Checked out and the folio total is finalised with in-room orders to date."
-        confirmLabel="Check out"
-        loading={checkout.isPending}
+        guestName={booking?.guest_name}
+        billing={billingQuery.data}
+        loading={billingQuery.isLoading}
+        submitting={checkout.isPending}
         onConfirm={runCheckout}
       />
     </>

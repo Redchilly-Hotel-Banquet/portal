@@ -64,11 +64,26 @@ const buildOutletPayload = (
     payload.created_at = now;
   }
 
-  const stringFields = ["name", "address", "contact_number", "contact_email", "google_maps_url"];
+  const stringFields = ["name", "address", "contact_number", "contact_email", "google_maps_url", "wifi_name", "wifi_password", "welcome_message"];
   for (const field of stringFields) {
     if (field in input) {
       payload[field] = toStringOrEmpty(input[field]);
     }
+  }
+
+  // Wi-Fi per floor, matched against each room's Floor when the welcome message is built.
+  if ("wifi_floors" in input) {
+    const seen = new Set<string>();
+    const floors: Array<{ floor: string; wifi_name: string; wifi_password: string }> = [];
+    for (const entry of Array.isArray(input.wifi_floors) ? input.wifi_floors.slice(0, 40) : []) {
+      const row = (entry ?? {}) as Record<string, unknown>;
+      const floor = toStringOrEmpty(row.floor);
+      const key = floor.toLowerCase();
+      if (!floor || seen.has(key)) continue;
+      seen.add(key);
+      floors.push({ floor, wifi_name: toStringOrEmpty(row.wifi_name), wifi_password: toStringOrEmpty(row.wifi_password) });
+    }
+    payload.wifi_floors = floors;
   }
 
   if ("is_active" in input) {
@@ -93,7 +108,11 @@ export class OutletService {
     const outlets = await db.collection<OutletDocument>("outlets").find({ is_active: true }).toArray();
     return {
       outlets: outlets
-        .map((doc) => normalizeDocument(doc))
+        .map((doc) => {
+          // Wi-Fi details are for checked-in guests only; they are sent by staff, never published.
+          const { wifi_name, wifi_password, wifi_floors, welcome_message, ...publicDoc } = doc;
+          return normalizeDocument(publicDoc);
+        })
         .map((doc) => ({
           ...doc,
           id: doc?.id ?? stringifyId(doc?._id) ?? "",

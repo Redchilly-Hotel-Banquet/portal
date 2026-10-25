@@ -93,9 +93,9 @@ export function RoomsStep({ state, dispatch, pricing, loading, error, onRetry, e
               </div>
 
               {category.amenities && category.amenities.length > 0 && (
-                <ul className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                <ul aria-label="Amenities" className="mt-3 flex flex-wrap gap-1.5">
                   {category.amenities.map((amenity) => (
-                    <li key={amenity} className="before:mr-3 before:content-['/'] first:before:content-none">
+                    <li key={amenity} className="rounded-full border border-border bg-muted/40 px-2.5 py-0.5 text-xs text-muted-foreground">
                       {amenity}
                     </li>
                   ))}

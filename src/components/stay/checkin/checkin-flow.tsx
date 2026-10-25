@@ -170,6 +170,7 @@ export function CheckinFlow() {
         const signatureUnchanged = sameSlot && guest.signature === guest.savedSignature;
         return {
           fullName: guest.fullName.trim(),
+          phone: guest.phone.trim(),
           documentType: guest.documentType,
           documentNumber: guest.documentNumber.trim(),
           // The server keeps the saved image and signature by index, so unchanged ones are not re-sent.

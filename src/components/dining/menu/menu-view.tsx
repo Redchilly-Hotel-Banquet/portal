@@ -86,7 +86,7 @@ export function MenuView() {
   const guestOrders = useQuery<{ orders: OrderRecord[] }>({
     queryKey: ["guest-orders-summary", session?.bookingId],
     enabled: trackOrders,
-    queryFn: () => apiPost<{ orders: OrderRecord[] }, { bookingId?: string }>("/public/orders/guest", { bookingId: session?.bookingId }),
+    queryFn: () => apiPost<{ orders: OrderRecord[] }, { bookingId?: string; checkinId?: string }>("/public/orders/guest", { bookingId: session?.bookingId, checkinId: session?.checkinId }, "user"),
     refetchInterval: 20_000,
     refetchOnWindowFocus: true,
   });

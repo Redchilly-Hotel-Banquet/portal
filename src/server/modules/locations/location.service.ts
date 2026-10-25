@@ -1,7 +1,6 @@
 import { mongoConnection } from "../../mongo";
-import { assignedRoomIds } from "../../utils/roomAssignments";
+import { assertCheckinId, findCheckedInBookingForRoom } from "../../utils/checkinId";
 import { HttpError } from "../../httpError";
-import { endOfUTCDay, startOfUTCDay } from "../../utils/dates";
 import { stringifyId, toObjectId } from "../../utils/objectId";
 import {
   BookingSummary,
@@ -10,8 +9,6 @@ import {
   ValidateLocationRequest,
   ValidateLocationResponse,
 } from "./location.types";
-
-const ACTIVE_BOOKING_STATUSES = ["PENDING", "CONFIRMED", "CHECKED_IN"];
 
 const normalizeOutlet = (doc: any): OutletSummary | null => {
   if (!doc) return null;
@@ -51,7 +48,6 @@ export class LocationService {
     const db = mongoConnection.getDb();
     const outletsCollection = db.collection("outlets");
     const roomsCollection = db.collection("rooms_tables");
-    const bookingsCollection = db.collection("bookings");
 
     const { code, type, outletId } = payload;
 
@@ -117,41 +113,16 @@ export class LocationService {
     }
 
     let bookingPayload: BookingSummary | null = null;
+    let requiresCheckinId = false;
     if (normalizedType === "ROOM" || normalizedType === "HOTEL_ROOM") {
-      const now = new Date();
-      const todayStart = startOfUTCDay(now);
-      const todayEnd = endOfUTCDay(now);
+      // A room's details are only shown to someone who knows the stay's 6-digit check-in ID. Without
+      // it nothing about the room's occupant is revealed, and a wrong ID looks the same as no stay.
       const roomIdStr = stringifyId(locationDoc._id) ?? "";
-      const candidateIds = [roomIdStr, trimmedCode].filter(Boolean);
-
-      const candidates = await bookingsCollection.find({
-        outlet_id: resolvedOutletKey,
-        status: { $in: ACTIVE_BOOKING_STATUSES },
-        $and: [
-          {
-            $or: [
-              { room_id: { $in: candidateIds } },
-              { room_ids: { $in: candidateIds } },
-              { "rooms_allocated.room_id": { $in: candidateIds } },
-            ],
-          },
-          {
-            $or: [
-              { check_in_date: { $lte: now }, check_out_date: { $gt: now } },
-              {
-                status: { $in: ["PENDING", "CONFIRMED"] },
-                check_in_date: { $gte: todayStart, $lte: todayEnd },
-              },
-              { status: "CHECKED_IN" },
-            ],
-          },
-        ],
-      }).toArray();
-
-      const roomIdForCheck = stringifyId(locationDoc._id) ?? "";
-      const booking = candidates.find((entry) => assignedRoomIds(entry).includes(roomIdForCheck)) ?? null;
-
-      if (booking) {
+      if (!payload.checkinId) {
+        requiresCheckinId = true;
+      } else {
+        const booking = await findCheckedInBookingForRoom(db, roomIdStr, resolvedOutletKey);
+        await assertCheckinId(db, `room:${roomIdStr}`, booking, payload.checkinId);
         bookingPayload = normalizeBooking(booking);
       }
     }
@@ -161,6 +132,7 @@ export class LocationService {
       location: normalizeLocation(locationDoc),
       outlet: normalizeOutlet(outletDoc),
       booking: bookingPayload,
+      requiresCheckinId,
     };
   }
 }

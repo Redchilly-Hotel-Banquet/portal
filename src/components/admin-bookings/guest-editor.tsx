@@ -12,6 +12,7 @@ import { compressImage } from "@/components/stay/compress-image";
 import { DOCUMENT_TYPES } from "@/components/stay/checkin/types";
 import { guestStatus, isGuestComplete, MAX_ADMIN_GUESTS, type AdminGuest, type Completeness } from "./checkin-guests";
 import { SignaturePad } from "./signature-pad";
+import { optionalPhoneError } from "@/lib/phone";
 
 const STATUS_LABEL: Record<Completeness, string> = {
   complete: "Complete",
@@ -73,6 +74,22 @@ function GuestCard({ guest, index, removable, onChange, onRemove, onPreview }: C
         <div className="space-y-1.5 sm:col-span-2">
           <Label htmlFor={`${id}-name`}>Full name</Label>
           <Input id={`${id}-name`} value={guest.fullName} onChange={(e) => onChange({ fullName: e.target.value })} autoComplete="off" />
+        </div>
+        <div className="space-y-1.5 sm:col-span-2">
+          <Label htmlFor={`${id}-phone`}>
+            Mobile number <span className="text-xs font-normal text-muted-foreground">Optional</span>
+          </Label>
+          <Input
+            id={`${id}-phone`}
+            type="tel"
+            inputMode="tel"
+            value={guest.phone}
+            placeholder="10-digit mobile number"
+            onChange={(e) => onChange({ phone: e.target.value })}
+            aria-invalid={Boolean(optionalPhoneError(guest.phone))}
+            autoComplete="off"
+          />
+          {optionalPhoneError(guest.phone) ? <p className="text-xs text-destructive">{optionalPhoneError(guest.phone)}</p> : null}
         </div>
         <div className="space-y-1.5">
           <Label htmlFor={`${id}-type`}>Document type</Label>

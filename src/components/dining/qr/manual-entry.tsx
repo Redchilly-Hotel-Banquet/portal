@@ -29,6 +29,7 @@ export function ManualEntry({ initial, busy, onSubmit }: ManualEntryProps) {
   const [type, setType] = useState<LocationKind>(initial?.type ?? "ROOM");
   const [code, setCode] = useState(initial?.code ?? "");
   const [outletId, setOutletId] = useState(initial?.outletId ?? "");
+  const [checkinId, setCheckinId] = useState("");
 
   const outlets = useQuery<{ outlets: OutletInfo[] }>({
     queryKey: ["public-outlets"],
@@ -43,10 +44,12 @@ export function ManualEntry({ initial, busy, onSubmit }: ManualEntryProps) {
     if (!outletId && list.length === 1) setOutletId(list[0].location_key || list[0].id);
   }, [list, outletId]);
 
+  const idReady = /^\d{6}$/.test(checkinId);
+
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (!code.trim() || !outletId.trim()) return;
-    onSubmit({ code: code.trim(), type, outletId: outletId.trim() });
+    if (!code.trim() || !outletId.trim() || (type === "ROOM" && !idReady)) return;
+    onSubmit({ code: code.trim(), type, outletId: outletId.trim(), checkinId: type === "ROOM" ? checkinId : undefined });
   };
 
   return (
@@ -107,7 +110,29 @@ export function ManualEntry({ initial, busy, onSubmit }: ManualEntryProps) {
         />
       </div>
 
-      <Button type="submit" disabled={busy || !code.trim() || !outletId.trim()} className="w-full sm:w-auto">
+      {type === "ROOM" && (
+        <div className="space-y-2">
+          <Label htmlFor="checkin-id">Check-in ID</Label>
+          <Input
+            id="checkin-id"
+            value={checkinId}
+            onChange={(e) => setCheckinId(e.target.value.replace(/\D/g, "").slice(0, 6))}
+            inputMode="numeric"
+            pattern="[0-9]{6}"
+            maxLength={6}
+            autoComplete="off"
+            placeholder="6 digits"
+            className="tabular-nums tracking-widest"
+            aria-describedby="checkin-id-hint"
+            required
+          />
+          <p id="checkin-id-hint" className="text-xs text-muted-foreground">
+            The 6-digit number the front desk gave you at check-in. It keeps room orders to guests staying here.
+          </p>
+        </div>
+      )}
+
+      <Button type="submit" disabled={busy || !code.trim() || !outletId.trim() || (type === "ROOM" && !idReady)} className="w-full sm:w-auto">
         {busy && <Loader2 className="animate-spin" aria-hidden />}
         Continue to menu
       </Button>

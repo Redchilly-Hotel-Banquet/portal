@@ -23,6 +23,8 @@ import {
   type SortKey,
 } from "./analytics-types";
 import { ActivityChart, RevenueSplitChart } from "./revenue-charts";
+import { PaymentSources } from "./payment-sources";
+import { PeriodPicker, defaultPeriod, periodLabel, type Period } from "./period-picker";
 
 const SORT_LABEL: Record<SortKey, string> = {
   revenue: "Revenue",
@@ -50,14 +52,16 @@ export function AnalyticsView() {
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("revenue");
   const [branch, setBranch] = useState("all");
+  const [period, setPeriod] = useState<Period>(defaultPeriod);
 
   const { data: outlets = [], isLoading, isError, isFetching, refetch } = useQuery<OutletAnalytics[]>({
-    queryKey: ANALYTICS_QUERY_KEY,
+    queryKey: [...ANALYTICS_QUERY_KEY, "period", period.from, period.to],
     queryFn: async () => {
-      const res = await apiPost<{ outlets: OutletAnalytics[] }>("/admin/analytics/outlets", {}, true);
+      const res = await apiPost<{ outlets: OutletAnalytics[] }>("/admin/analytics/outlets", period, true);
       return res?.outlets ?? [];
     },
     refetchInterval: 30000,
+    placeholderData: (previous) => previous,
   });
 
   const scoped = useMemo(
@@ -101,7 +105,7 @@ export function AnalyticsView() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "branch-analytics.csv";
+    a.download = `branch-analytics-${period.from}-to-${period.to}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -123,10 +127,14 @@ export function AnalyticsView() {
     <AdminShell
       scope="admin"
       title="Analytics"
-      description="Revenue, orders and bookings by branch. Refreshes every 30 seconds."
+      description={`Revenue, orders and bookings by branch for ${periodLabel(period)}. Refreshes every 30 seconds.`}
       actions={actions}
     >
       <div className="space-y-6">
+        <PeriodPicker value={period} onChange={setPeriod} />
+        <p className="-mt-3 text-xs text-muted-foreground">
+          Orders and bookings are those created in the period; payments are those received in it. Active stays, rooms and tables are as of now.
+        </p>
         {isLoading ? (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             {Array.from({ length: 8 }).map((_, i) => (
@@ -190,10 +198,12 @@ export function AnalyticsView() {
                   <ChartPanel title="Revenue by source" description="Food and beverage against room bookings, per branch.">
                     <RevenueSplitChart outlets={rows} />
                   </ChartPanel>
-                  <ChartPanel title="Orders and bookings" description="Lifetime volume per branch.">
+                  <ChartPanel title="Orders and bookings" description="Volume per branch in the chosen period.">
                     <ActivityChart outlets={rows} />
                   </ChartPanel>
                 </div>
+
+                <PaymentSources outlets={rows} />
 
                 <section className="rounded-md border border-border bg-card">
                   <div className="border-b border-border px-5 py-4">

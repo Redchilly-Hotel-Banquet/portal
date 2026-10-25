@@ -1,6 +1,6 @@
 "use client";
 
-import { Clock, Repeat2 } from "lucide-react";
+import { Clock, Phone, Repeat2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge, statusLabel } from "@/components/admin/status-badge";
@@ -52,6 +52,11 @@ export function OrderCard({ order, isRepeat, now, busy, onStatusChange }: OrderC
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="font-sans text-sm font-semibold tabular-nums tracking-wide">#{shortId(order._id)}</h3>
+            {order.source === "PHONE" ? (
+              <span className="inline-flex items-center gap-1 rounded-sm border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                <Phone className="h-3 w-3" strokeWidth={1.75} aria-hidden /> Phone
+              </span>
+            ) : null}
             {isRepeat ? (
               <span className="inline-flex items-center gap-1 rounded-sm border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground">
                 <Repeat2 className="h-3 w-3" strokeWidth={1.75} aria-hidden /> Repeat

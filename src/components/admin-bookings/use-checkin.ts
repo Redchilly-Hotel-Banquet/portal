@@ -99,7 +99,7 @@ export function useCheckinManager(booking: Booking | null) {
     if (!booking || !context) return;
     const details = context.checkinDetails;
     if (!guests.every(hasDetails)) {
-      toast.error("Each guest needs a name, document number and ID photo before saving.");
+      toast.error("Each guest needs a name, document number and ID photo, and any mobile number must be valid, before saving.");
       return;
     }
     if (markComplete && issues.length > 0) {

@@ -12,7 +12,9 @@ import {
   ROOM_STATUS_LABEL,
   roomMismatchNote,
 } from "./invoice-details";
-import { bookingTotal, outletLabel, roomLabel, roomNightlyRate, stayNights } from "./utils";
+import { paymentModeLabel } from "@/lib/payment-modes";
+import { roomChargeLines, gstBasis } from "./invoice-lines";
+import { bookingTotal, outletLabel, stayNights } from "./utils";
 
 const LABEL = "text-[10px] uppercase tracking-widest text-neutral-500";
 
@@ -32,9 +34,10 @@ function Field({ label, children, className }: { label: string; children: ReactN
 export function InvoiceDocument({ summary }: { summary: BillingSummary }) {
   const { booking } = summary;
   const nights = stayNights(booking);
-  const rooms = booking.rooms_allocated ?? [];
-  const hasFolioRooms = rooms.some((room) => roomNightlyRate(room) > 0);
   const roomTotal = summary.roomTotal || bookingTotal(booking);
+  const roomLines = roomChargeLines(booking, roomTotal, nights);
+  const payments = booking.payments ?? [];
+  const balanceDue = Math.max(Math.round((summary.grandTotal - payments.reduce((sum, payment) => sum + payment.amount, 0)) * 100) / 100, 0);
   const checkin = booking.checkin_details;
   const guests = checkin?.guests ?? [];
   const anyGuestSignature = guests.some((guest) => guest.signature_image?.data_url);
@@ -156,70 +159,178 @@ export function InvoiceDocument({ summary }: { summary: BillingSummary }) {
         </section>
       ) : null}
 
-      <section className="break-inside-avoid py-3">
-        <table className="w-full border-collapse">
+      <section className="py-3">
+        <p className={LABEL}>Charges</p>
+        <table className="mt-1 w-full border-collapse">
           <thead>
             <tr className="border-b border-neutral-300 text-left text-[10px] uppercase tracking-widest text-neutral-500">
               <th className="py-1 font-medium">Description</th>
+              <th className="py-1 text-right font-medium">Qty</th>
+              <th className="py-1 text-right font-medium">Rate</th>
               <th className="py-1 text-right font-medium">Amount</th>
             </tr>
           </thead>
           <tbody>
-            <tr className="border-b border-neutral-200 align-top">
-              <td className="py-1.5">
-                <p className="font-medium">Room charges</p>
-                {hasFolioRooms
-                  ? rooms.map((room, index) => {
-                      const rate = roomNightlyRate(room);
-                      const count = room.perNight?.length ?? booking.nights ?? nights;
-                      return (
-                        <p key={room.room_id ?? room.id ?? index} className="text-neutral-500">
-                          Room {roomLabel(room, index)}
-                          {rate > 0 ? `, ${formatINR(rate)} x ${count} night${count > 1 ? "s" : ""}` : ""}
-                        </p>
-                      );
-                    })
-                  : null}
+            <tr className="break-inside-avoid">
+              <td colSpan={4} className="pb-0.5 pt-2 font-semibold">
+                A. Room charges
               </td>
-              <td className="py-1.5 text-right font-medium tabular-nums">{formatINR(roomTotal)}</td>
             </tr>
-            <tr className={`align-top ${summary.orders.length === 0 ? "border-b border-neutral-200" : ""}`}>
-              <td className="py-1.5">
-                <p className="font-medium">Food and beverages</p>
-                {summary.orders.length === 0 ? <p className="text-neutral-500">No in-room orders.</p> : null}
+            {roomLines.map((line) => (
+              <tr key={line.key} className="break-inside-avoid align-top">
+                <td className="py-0.5 pl-3">{line.label}</td>
+                <td className="py-0.5 text-right tabular-nums">
+                  {line.nights} night{line.nights === 1 ? "" : "s"}
+                </td>
+                <td className="py-0.5 text-right tabular-nums">{formatINR(line.rate)}</td>
+                <td className="py-0.5 text-right tabular-nums">{formatINR(line.amount)}</td>
+              </tr>
+            ))}
+            <tr className="break-inside-avoid border-t border-neutral-200 font-medium">
+              <td colSpan={3} className="py-1 text-right">
+                Room charges (A)
               </td>
-              <td className="py-1.5 text-right font-medium tabular-nums">{formatINR(summary.foodTotal)}</td>
+              <td className="py-1 text-right tabular-nums">{formatINR(roomTotal)}</td>
             </tr>
+
+            <tr className="break-inside-avoid">
+              <td colSpan={4} className="pb-0.5 pt-3 font-semibold">
+                B. Food and beverages
+              </td>
+            </tr>
+            {summary.orders.length === 0 ? (
+              <tr>
+                <td colSpan={4} className="py-0.5 pl-3 text-neutral-500">
+                  No food orders.
+                </td>
+              </tr>
+            ) : null}
             {summary.orders.map((order) => (
               <Fragment key={order.id}>
                 <tr className="break-inside-avoid align-top text-neutral-600">
-                  <td className="pb-0.5 pl-3 pt-1 text-[11px]">
-                    Order {order.id.slice(0, 8)}, {formatDateTime(order.created_at)}
-                  </td>
-                  <td className="pb-0.5 pt-1 text-right text-[11px] tabular-nums">
-                    {formatINR(Number(order.total ?? order.subtotal ?? 0))}
+                  <td colSpan={4} className="pb-0.5 pl-3 pt-1.5 text-[11px]">
+                    Order {order.id.slice(0, 8).toUpperCase()}, {formatDateTime(order.created_at)}
                   </td>
                 </tr>
                 {(order.items ?? []).map((item, index) => (
                   <tr key={`${order.id}-${index}`} className="break-inside-avoid align-top">
-                    <td className="py-px pl-6 text-[11px]">
-                      {item.quantity} x {item.name}
+                    <td className="py-px pl-6">
+                      {item.name}
                       {item.notes ? <span className="text-neutral-500"> ({item.notes})</span> : null}
                     </td>
-                    <td className="py-px text-right text-[11px] tabular-nums text-neutral-600">
-                      {formatINR(item.price * item.quantity)}
-                    </td>
+                    <td className="py-px text-right tabular-nums">{item.quantity}</td>
+                    <td className="py-px text-right tabular-nums">{formatINR(item.price)}</td>
+                    <td className="py-px text-right tabular-nums">{formatINR(item.price * item.quantity)}</td>
                   </tr>
                 ))}
               </Fragment>
             ))}
+            <tr className="break-inside-avoid border-t border-neutral-200 font-medium">
+              <td colSpan={3} className="py-1 text-right">
+                Food and beverages (B)
+              </td>
+              <td className="py-1 text-right tabular-nums">{formatINR(summary.foodTotal)}</td>
+            </tr>
           </tbody>
           <tfoot>
-            <tr className="border-t border-neutral-300">
-              <td className="pt-2 text-sm font-semibold">Total payable</td>
-              <td className="pt-2 text-right text-sm font-semibold tabular-nums">{formatINR(summary.grandTotal)}</td>
+            <tr className="break-inside-avoid border-t border-neutral-400 font-semibold">
+              <td colSpan={3} className="pt-1.5 text-right">
+                Total before GST (A + B)
+              </td>
+              <td className="pt-1.5 text-right tabular-nums">{formatINR(summary.subtotal)}</td>
             </tr>
           </tfoot>
+        </table>
+      </section>
+
+      <section className="break-inside-avoid border-t border-neutral-300 py-3">
+        <p className={LABEL}>GST (CGST and SGST, Uttar Pradesh)</p>
+        <table className="mt-1 w-full border-collapse">
+          <thead>
+            <tr className="border-b border-neutral-300 text-left text-[10px] uppercase tracking-widest text-neutral-500">
+              <th className="py-1 font-medium">Charge</th>
+              <th className="py-1 text-right font-medium">Taxable value</th>
+              <th className="py-1 text-right font-medium">CGST</th>
+              <th className="py-1 text-right font-medium">SGST</th>
+              <th className="py-1 text-right font-medium">Total GST</th>
+            </tr>
+          </thead>
+          <tbody>
+            {summary.gst.lines.map((line, index) => (
+              <tr key={`${line.kind}-${line.rate}-${index}`} className="break-inside-avoid border-b border-neutral-200 align-top">
+                <td className="py-1 pr-3">
+                  <p className="font-medium">
+                    {line.description} at {line.rate}%
+                  </p>
+                  <p className="text-[10px] text-neutral-500">{gstBasis(line, formatINR)}</p>
+                </td>
+                <td className="py-1 text-right tabular-nums">{formatINR(line.taxable)}</td>
+                <td className="py-1 text-right tabular-nums">
+                  {formatINR(line.cgst)}
+                  <span className="block text-[10px] text-neutral-500">{line.rate / 2}%</span>
+                </td>
+                <td className="py-1 text-right tabular-nums">
+                  {formatINR(line.sgst)}
+                  <span className="block text-[10px] text-neutral-500">{line.rate / 2}%</span>
+                </td>
+                <td className="py-1 text-right tabular-nums">{formatINR(line.cgst + line.sgst)}</td>
+              </tr>
+            ))}
+            <tr className="font-medium">
+              <td className="pt-1">Total</td>
+              <td className="pt-1 text-right tabular-nums">{formatINR(summary.gst.taxable)}</td>
+              <td className="pt-1 text-right tabular-nums">{formatINR(summary.gst.cgst)}</td>
+              <td className="pt-1 text-right tabular-nums">{formatINR(summary.gst.sgst)}</td>
+              <td className="pt-1 text-right tabular-nums">{formatINR(summary.gst.gst)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section className="break-inside-avoid border-t border-neutral-300 py-3">
+        <p className={LABEL}>Amount payable</p>
+        <table className="mt-1 ml-auto w-full max-w-sm border-collapse">
+          <tbody>
+            <tr>
+              <td className="py-0.5">Total before GST</td>
+              <td className="py-0.5 text-right tabular-nums">{formatINR(summary.gst.taxable)}</td>
+            </tr>
+            <tr>
+              <td className="py-0.5">
+                Add: GST
+                <span className="block text-[10px] text-neutral-500">
+                  CGST {formatINR(summary.gst.cgst)} + SGST {formatINR(summary.gst.sgst)}
+                </span>
+              </td>
+              <td className="py-0.5 text-right tabular-nums">{formatINR(summary.gst.gst)}</td>
+            </tr>
+            {summary.gst.roundOff !== 0 ? (
+              <tr>
+                <td className="py-0.5">Round off</td>
+                <td className="py-0.5 text-right tabular-nums">
+                  {summary.gst.roundOff > 0 ? "+" : "-"}
+                  {formatINR(Math.abs(summary.gst.roundOff))}
+                </td>
+              </tr>
+            ) : null}
+            <tr className="border-t border-neutral-400 text-sm font-semibold">
+              <td className="pt-1.5">Total payable</td>
+              <td className="pt-1.5 text-right tabular-nums">{formatINR(summary.grandTotal)}</td>
+            </tr>
+            {payments.map((payment, index) => (
+              <tr key={`pay-${index}`} className="text-neutral-700">
+                <td className="py-0.5">
+                  Less: paid by {paymentModeLabel(payment.mode)}
+                  {payment.reference ? ` (${payment.reference})` : ""}
+                </td>
+                <td className="py-0.5 text-right tabular-nums">-{formatINR(payment.amount)}</td>
+              </tr>
+            ))}
+            <tr className="border-t border-neutral-300 font-semibold">
+              <td className="pt-1">Balance due</td>
+              <td className="pt-1 text-right tabular-nums">{formatINR(balanceDue)}</td>
+            </tr>
+          </tbody>
         </table>
       </section>
 

@@ -41,7 +41,8 @@ export function QrView() {
       if (result.ok === false) {
         setPrefill({ code: request.code, type: request.type, outletId: request.outletId });
         setPhase({ name: "input", error: result.message });
-        toast.error(result.message);
+        // Asking for the ID is the expected next step, not a failure worth a toast.
+        if (!result.needsCheckinId) toast.error(result.message);
         return;
       }
       if (result.warning) toast.error(result.warning);

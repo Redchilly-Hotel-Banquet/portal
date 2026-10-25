@@ -1,5 +1,5 @@
 import { ObjectId } from "mongodb";
-import { assignedRoomIds } from "../../utils/roomAssignments";
+import { assertCheckinId, findCheckedInBookingForRoom, ownsBooking } from "../../utils/checkinId";
 import { mongoConnection } from "../../mongo";
 import { HttpError } from "../../httpError";
 import { AuthenticatedUser } from "../../session";
@@ -74,9 +74,27 @@ type MenuItemDocument = Record<string, unknown> & {
   _id?: FlexibleId;
 };
 
+/**
+ * Room orders belong to a stay, so reading or adding to them needs proof of the stay: the signed-in
+ * account that owns the booking, or the stay's 6-digit check-in ID.
+ */
+const authoriseBooking = async (
+  db: ReturnType<typeof mongoConnection.getDb>,
+  bookingId: string,
+  checkinId: unknown,
+  user: AuthenticatedUser | null,
+) => {
+  const booking = await db
+    .collection<BookingDocument>("bookings")
+    .findOne({ _id: resolveCollectionId(bookingId, "Invalid booking id") });
+  if (ownsBooking(booking, user)) return booking;
+  await assertCheckinId(db, `booking:${bookingId}`, booking, checkinId);
+  return booking;
+};
+
 export class OrderService {
-  async createOrder(payload: CreateOrderRequest): Promise<CreateOrderResponse> {
-    const { outletId, roomTableId, bookingId, specialInstructions, items, subtotal } = payload;
+  async createOrder(payload: CreateOrderRequest, user: AuthenticatedUser | null = null): Promise<CreateOrderResponse> {
+    const { outletId, roomTableId, specialInstructions, items, subtotal } = payload;
     if (!outletId) {
       throw new HttpError(400, "Outlet ID is required to place an order");
     }
@@ -101,63 +119,25 @@ export class OrderService {
       }
     }
 
+    // Rooms and tables must exist and belong to the outlet being ordered from.
+    if (!location || (location.outlet_id && String(location.outlet_id) !== String(outletId))) {
+      throw new HttpError(400, "Unknown room or table for this branch");
+    }
+
     const isRoomOrder =
-      (location?.type ?? "").toString().toUpperCase() === "ROOM" ||
-      (location?.type ?? "").toString().toUpperCase() === "HOTEL_ROOM";
+      (location.type ?? "").toString().toUpperCase() === "ROOM" ||
+      (location.type ?? "").toString().toUpperCase() === "HOTEL_ROOM";
 
     let resolvedBookingId: string | null = null;
     if (isRoomOrder) {
-      const activeStatuses = ["PENDING", "CONFIRMED", "CHECKED_IN"];
-      let activeBooking: any = null;
-
-      if (bookingId) {
-        activeBooking = await bookingsCollection.findOne({
-          _id: resolveCollectionId(bookingId, "Invalid booking id"),
-          status: { $in: activeStatuses },
-        });
+      const roomIdString = serializeId(location._id) ?? "";
+      // Only a checked-in stay can order to its room, and only with proof it is theirs. The booking is
+      // found from the room, never taken from the request.
+      const activeBooking = await findCheckedInBookingForRoom(db, roomIdString, String(outletId));
+      if (!ownsBooking(activeBooking, user)) {
+        await assertCheckinId(db, `room:${roomIdString}`, activeBooking, payload.checkinId);
       }
-
-      if (!activeBooking) {
-        const now = new Date();
-        const roomIdString = serializeId(location?._id) ?? String(location?._id ?? "");
-        const candidates = [roomIdString, roomTableId].filter(Boolean).map((value) => String(value));
-
-        const possible = await bookingsCollection.find({
-          outlet_id: outletId,
-          status: { $in: activeStatuses },
-          $and: [
-            {
-              $or: [
-                { room_id: { $in: candidates } },
-                { room_ids: { $in: candidates } },
-                { "rooms_allocated.room_id": { $in: candidates } },
-              ],
-            },
-            {
-              $or: [
-                { check_in_date: { $lte: now }, check_out_date: { $gte: now } },
-                { check_in_date: { $exists: false } },
-              ],
-            },
-          ],
-        }).toArray();
-        // Several bookings can mention a room; the one that actually holds it is the one that counts.
-        activeBooking = possible.find((entry) => assignedRoomIds(entry).includes(roomIdString)) ?? null;
-      }
-
-      if (!activeBooking) {
-        throw new HttpError(400, "No active booking found for this room. Please contact the front desk.");
-      }
-
-      const locationRoomId = serializeId(location?._id) ?? "";
-      // Only rooms the booking really holds count; an un-assigned room left on the document does not.
-      const matchesRoom = !locationRoomId || assignedRoomIds(activeBooking).includes(locationRoomId);
-
-      if (!matchesRoom) {
-        throw new HttpError(400, "This booking is tied to a different room.");
-      }
-
-      resolvedBookingId = serializeId(activeBooking._id);
+      resolvedBookingId = serializeId(activeBooking?._id);
     }
 
     const orderDoc = {
@@ -191,13 +171,14 @@ export class OrderService {
     return { orderId, bookingId: resolvedBookingId };
   }
 
-  async getGuestOrders(payload: GetGuestOrdersRequest): Promise<GetGuestOrdersResponse> {
+  async getGuestOrders(payload: GetGuestOrdersRequest, user: AuthenticatedUser | null = null): Promise<GetGuestOrdersResponse> {
     const { bookingId } = payload;
     if (!bookingId) {
       throw new HttpError(400, "Booking id is required");
     }
 
     const db = mongoConnection.getDb();
+    await authoriseBooking(db, bookingId, payload.checkinId, user);
     const ordersCollection = db.collection<OrderDocument>("orders");
     const roomsCollection = db.collection<RoomTableDocument>("rooms_tables");
     const orderItemsCollection = db.collection<OrderItemDocument>("order_items");
@@ -207,30 +188,31 @@ export class OrderService {
       .sort({ created_at: -1 })
       .toArray();
 
-    const enrichedOrders = [] as any[];
+    // Rooms, order items and menu items are fetched in bulk, not once per order.
+    const orderIds = orders.map((order) => serializeId(order._id)).filter((id): id is string => Boolean(id));
+    const roomIds = Array.from(new Set(orders.map((order) => order.room_table_id).filter(Boolean).map((id) => String(id))));
+    const [rooms, allItems] = await Promise.all([
+      roomIds.length
+        ? roomsCollection.find({ _id: { $in: roomIds.flatMap((id) => [id, toObjectId(id)].filter(Boolean) as FlexibleId[]) } }).toArray()
+        : [],
+      orderIds.length ? orderItemsCollection.find({ order_id: { $in: orderIds } }).toArray() : [],
+    ]);
+    const roomsById = new Map<string, any>((rooms as any[]).map((room) => [serializeId(room._id) ?? "", room]));
+    const menuItemIds = Array.from(new Set(allItems.map((it) => toObjectId(it.menu_item_id)).filter((id): id is ObjectId => Boolean(id))));
+    const menuItems = menuItemIds.length ? await menuItemsCollection.find({ _id: { $in: menuItemIds } }).toArray() : [];
+    const menuItemsById = new Map<string, unknown>(menuItems.map((mi) => [serializeId(mi._id) ?? "", mi]));
+    const itemsByOrder = new Map<string, OrderItemDocument[]>();
+    for (const item of allItems) {
+      const list = itemsByOrder.get(String(item.order_id)) ?? [];
+      list.push(item);
+      itemsByOrder.set(String(item.order_id), list);
+    }
 
+    const enrichedOrders = [] as any[];
     for (const order of orders) {
       const orderId = serializeId(order._id);
       if (!orderId) continue;
-
-      let roomTable = null;
-      if (order.room_table_id) {
-        const resolvedRoomId = resolveCollectionId(order.room_table_id, "Invalid room id");
-        roomTable = await roomsCollection.findOne({ _id: resolvedRoomId });
-      }
-
-      const orderItems = await orderItemsCollection.find({ order_id: orderId }).toArray();
-      const menuItemIds = orderItems
-        .map((it) => toObjectId(it.menu_item_id))
-        .filter((id): id is ObjectId => Boolean(id));
-
-      let menuItemsById = new Map<string, unknown>();
-      if (menuItemIds.length > 0) {
-        const menuItems = await menuItemsCollection.find({ _id: { $in: menuItemIds } }).toArray();
-        menuItemsById = new Map(menuItems.map((mi) => [serializeId(mi._id) ?? "", mi]));
-      }
-
-      const serializedItems = orderItems.map((item) => ({
+      const serializedItems = (itemsByOrder.get(orderId) ?? []).map((item) => ({
         ...item,
         id: serializeId(item._id),
         menu_items: menuItemsById.get(serializeId(item.menu_item_id) ?? "") ?? null,
@@ -242,7 +224,7 @@ export class OrderService {
         _id: orderId,
         booking_id: serializeId(order.booking_id),
         room_table_id: order.room_table_id ? serializeId(order.room_table_id) : null,
-        rooms_tables: roomTable,
+        rooms_tables: order.room_table_id ? roomsById.get(String(order.room_table_id)) ?? null : null,
         order_items: serializedItems,
       });
     }
@@ -250,7 +232,7 @@ export class OrderService {
     return { orders: enrichedOrders };
   }
 
-  async getOrder(payload: GetOrderRequest) {
+  async getOrder(payload: GetOrderRequest, user: AuthenticatedUser | null = null) {
     const { orderId, bookingId } = payload;
     if (!orderId) {
       throw new HttpError(400, "Order ID is required");
@@ -278,6 +260,8 @@ export class OrderService {
     if (bookingId && orderBookingId && orderBookingId !== bookingId) {
       throw new HttpError(400, "Order does not belong to this booking");
     }
+    // Room orders are private to the stay. Table orders have no booking and stay readable by their id.
+    if (orderBookingId) await authoriseBooking(db, orderBookingId, payload.checkinId, user);
 
     const orderItems = await orderItemsCollection.find({ order_id: orderId }).toArray();
     const menuItemIds = orderItems
@@ -343,28 +327,33 @@ export class OrderService {
         }
 
         const orders = await ordersCollection.find(filter).sort({ created_at: -1 }).toArray();
+        // Bulk lookups rather than three queries per order; the kitchen screen polls this list.
+        const orderIds = orders.map((order) => serializeId(order._id) ?? "").filter(Boolean);
+        const roomIds = Array.from(new Set(orders.map((order) => order.room_table_id).filter(Boolean).map((id) => String(id))));
+        const [rooms, allItems] = await Promise.all([
+          roomIds.length
+            ? roomsCollection.find({ _id: { $in: roomIds.flatMap((id) => [id, toObjectId(id)].filter(Boolean) as FlexibleId[]) } }).toArray()
+            : [],
+          orderIds.length ? orderItemsCollection.find({ order_id: { $in: orderIds } }).toArray() : [],
+        ]);
+        const roomsById = new Map<string, any>((rooms as any[]).map((room) => [serializeId(room._id) ?? "", room]));
+        const menuIds = Array.from(new Set(allItems.map((item) => item.menu_item_id).filter(Boolean).map((id) => String(id))));
+        const menuDocs = menuIds.length
+          ? await menuItemsCollection.find({ _id: { $in: menuIds.flatMap((id) => [id, toObjectId(id)].filter(Boolean) as FlexibleId[]) } }).toArray()
+          : [];
+        const menuById = new Map<string, any>(menuDocs.map((doc) => [serializeId(doc._id) ?? "", doc]));
+        for (const item of allItems) {
+          item.menu_items = item.menu_item_id ? menuById.get(String(item.menu_item_id)) ?? null : null;
+        }
+        const itemsByOrder = new Map<string, OrderItemDocument[]>();
+        for (const item of allItems) {
+          const list = itemsByOrder.get(String(item.order_id)) ?? [];
+          list.push(item);
+          itemsByOrder.set(String(item.order_id), list);
+        }
         for (const order of orders) {
-          if (order.room_table_id) {
-            const roomTable = await roomsCollection.findOne({
-              _id: resolveCollectionId(order.room_table_id, "Invalid room id"),
-            });
-            order.rooms_tables = roomTable;
-          }
-
-          const orderItems = await orderItemsCollection
-            .find({ order_id: serializeId(order._id) ?? "" })
-            .toArray();
-          for (const item of orderItems) {
-            if (item.menu_item_id) {
-              const menuItem = await menuItemsCollection.findOne({
-                _id: resolveCollectionId(item.menu_item_id, "Invalid menu item id"),
-              });
-              item.menu_items = menuItem;
-            } else {
-              item.menu_items = null;
-            }
-          }
-          order.order_items = orderItems;
+          if (order.room_table_id) order.rooms_tables = roomsById.get(String(order.room_table_id)) ?? null;
+          order.order_items = itemsByOrder.get(serializeId(order._id) ?? "") ?? [];
         }
         return orders;
       }

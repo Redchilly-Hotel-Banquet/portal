@@ -32,6 +32,7 @@ export interface CheckinDetails {
     full_name: string;
     document_type: string;
     document_number: string;
+    phone?: string | null;
     /** Present instead of the number and images when only a summary is shared (see CheckinResponse.locked). */
     document_number_last4?: string | null;
     has_document_image?: boolean;
@@ -55,6 +56,8 @@ export interface GuestEntry {
   /** Stable client id for React keys and error mapping. */
   key: string;
   fullName: string;
+  /** Optional mobile number, so reception can send the stay details on WhatsApp. */
+  phone: string;
   documentType: string;
   documentNumber: string;
   imageDataUrl: string;

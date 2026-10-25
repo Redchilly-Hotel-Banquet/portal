@@ -1,4 +1,5 @@
 import { DOCUMENT_TYPES } from "@/components/stay/checkin/types";
+import { optionalPhoneError, tenDigitPhone } from "@/lib/phone";
 import type { CheckinContext, CheckinGuest } from "./types";
 
 export const MAX_ADMIN_GUESTS = 20;
@@ -9,6 +10,8 @@ export const DEFAULT_DOCUMENT_TYPE = DOCUMENT_TYPES[0].value;
 export type AdminGuest = {
   key: string;
   fullName: string;
+  /** Optional; lets reception send the stay details to this guest on WhatsApp. */
+  phone: string;
   documentType: string;
   documentNumber: string;
   imageDataUrl: string;
@@ -23,6 +26,7 @@ export type AdminGuest = {
 
 export type GuestPayload = {
   fullName: string;
+  phone: string;
   documentType: string;
   documentNumber: string;
   documentImageDataUrl?: string;
@@ -37,6 +41,7 @@ const nextKey = () => `guest-${Date.now()}-${counter++}`;
 export const blankGuest = (): AdminGuest => ({
   key: nextKey(),
   fullName: "",
+  phone: "",
   documentType: DEFAULT_DOCUMENT_TYPE,
   documentNumber: "",
   imageDataUrl: "",
@@ -56,6 +61,7 @@ export function seedGuests(context: CheckinContext): AdminGuest[] {
   const guests: AdminGuest[] = stored.map((guest, index) => ({
     key: nextKey(),
     fullName: guest.full_name ?? "",
+    phone: guest.phone ?? (index === 0 ? tenDigitPhone(context.booking?.guest_phone) ?? "" : ""),
     documentType: guest.document_type || DEFAULT_DOCUMENT_TYPE,
     documentNumber: guest.document_number ?? "",
     imageDataUrl: guest.document_image?.data_url ?? "",
@@ -66,12 +72,14 @@ export function seedGuests(context: CheckinContext): AdminGuest[] {
     savedImage: guest.document_image?.data_url ?? "",
     savedSignature: guest.signature_image?.data_url ?? "",
   }));
-  while (guests.length < bookedGuestCount(context)) guests.push(blankGuest());
+  while (guests.length < bookedGuestCount(context)) {
+    guests.push(guests.length === 0 ? { ...blankGuest(), phone: tenDigitPhone(context.booking?.guest_phone) ?? "" } : blankGuest());
+  }
   return guests;
 }
 
 export const hasDetails = (guest: AdminGuest): boolean =>
-  Boolean(guest.fullName.trim() && guest.documentType && guest.documentNumber.trim() && guest.imageDataUrl);
+  !optionalPhoneError(guest.phone) && Boolean(guest.fullName.trim() && guest.documentType && guest.documentNumber.trim() && guest.imageDataUrl);
 
 export const isGuestComplete = (guest: AdminGuest): boolean => hasDetails(guest) && Boolean(guest.signature);
 
@@ -100,6 +108,7 @@ export function buildGuestPayload(guests: AdminGuest[]): GuestPayload[] {
     const moved = guest.savedIndex !== index;
     const item: GuestPayload = {
       fullName: guest.fullName.trim(),
+      phone: guest.phone.trim(),
       documentType: guest.documentType,
       documentNumber: guest.documentNumber.trim(),
     };

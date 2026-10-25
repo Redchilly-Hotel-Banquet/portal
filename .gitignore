@@ -12,3 +12,4 @@ next-env.d.ts
 *.log
 room-repair-backup-*.json
 .env.example
+scripts

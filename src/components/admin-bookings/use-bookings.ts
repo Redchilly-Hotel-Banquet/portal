@@ -9,6 +9,7 @@ import type {
   BookingsResponse,
   OutletOption,
 } from "./types";
+import type { PaymentLine } from "@/lib/payment-modes";
 import { errorMessage } from "./utils";
 
 export const BOOKINGS_KEY = ["admin-bookings"] as const;
@@ -84,9 +85,9 @@ export function useCreateBooking(onDone?: () => void) {
 export function useCheckout() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (bookingId: string) =>
-      apiPost<BillingSummary>("/admin/bookings/billing", { bookingId, action: "checkout" }, true),
-    onSuccess: (data, bookingId) => {
+    mutationFn: ({ bookingId, payments }: { bookingId: string; payments: PaymentLine[] }) =>
+      apiPost<BillingSummary>("/admin/bookings/billing", { bookingId, action: "checkout", payments }, true),
+    onSuccess: (data, { bookingId }) => {
       queryClient.setQueryData(billingKey(bookingId), data);
       queryClient.invalidateQueries({ queryKey: BOOKINGS_KEY });
       toast.success("Checked out and folio finalised");

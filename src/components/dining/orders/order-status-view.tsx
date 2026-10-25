@@ -27,7 +27,7 @@ export function OrderStatusView() {
   const query = useQuery<OrderRecord>({
     queryKey: ["order", orderId, bookingId],
     enabled: Boolean(orderId) && ready,
-    queryFn: () => apiPost<OrderRecord, { orderId?: string; bookingId: string | null }>("/public/orders/detail", { orderId, bookingId }),
+    queryFn: () => apiPost<OrderRecord, { orderId?: string; bookingId: string | null; checkinId?: string }>("/public/orders/detail", { orderId, bookingId, checkinId: session?.checkinId }, "user"),
     refetchInterval: (q) => (isOrderDelivered(q.state.data?.status) ? false : POLL_MS),
     refetchOnWindowFocus: false,
   });

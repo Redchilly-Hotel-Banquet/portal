@@ -6,6 +6,8 @@ export type GuestSession = {
   outletName?: string | null;
   assignedAt?: string;
   bookingId?: string;
+  /** 6-digit check-in ID that proves this device belongs to the stay. Room sessions only. */
+  checkinId?: string;
   bookingCode?: string;
   bookingStatus?: string;
   checkOutDate?: string;

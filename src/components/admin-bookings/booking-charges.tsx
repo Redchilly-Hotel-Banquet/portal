@@ -12,6 +12,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import type { Booking, BillingSummary } from "./types";
 import { useUpdateAmount } from "./use-bookings";
 import { bookingTotal } from "./utils";
+import { GstBreakdown } from "./gst-breakdown";
+import { paymentModeLabel } from "@/lib/payment-modes";
 
 type Props = {
   booking: Booking;
@@ -102,10 +104,32 @@ export function BookingCharges({ booking, billing, loading, error }: Props) {
             <Row label="Food and beverages">
               <Money value={billing.foodTotal} />
             </Row>
-            <Row label="Folio total" strong>
-              <Money value={billing.grandTotal} />
+            <Row label="Before GST">
+              <Money value={billing.subtotal} />
             </Row>
           </dl>
+
+          <div>
+            <h4 className="eyebrow mb-2">GST and total payable</h4>
+            <GstBreakdown gst={billing.gst} />
+          </div>
+
+          {billing.booking.payments?.length ? (
+            <div>
+              <h4 className="eyebrow mb-2">Payment received</h4>
+              <ul className="divide-y rounded-md border bg-card text-sm">
+                {billing.booking.payments.map((payment, index) => (
+                  <li key={index} className="flex items-center justify-between gap-3 p-3">
+                    <span>
+                      {paymentModeLabel(payment.mode)}
+                      {payment.reference ? <span className="ml-2 text-xs text-muted-foreground">{payment.reference}</span> : null}
+                    </span>
+                    <span className="tabular-nums">{formatINR(payment.amount)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
 
           <div>
             <h4 className="eyebrow mb-2">In-room orders</h4>

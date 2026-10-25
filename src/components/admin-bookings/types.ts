@@ -32,8 +32,14 @@ export type Booking = {
   guest_name?: string;
   guest_email?: string | null;
   guest_phone?: string | null;
+  /** 6-digit ID guests use to order food to their room. Staff only. */
+  checkin_id?: string;
+  /** How the guest paid at check-out. */
+  payments?: Array<{ mode: string; amount: number; reference?: string | null }>;
+  paid_at?: string;
   number_of_guests?: number;
   rooms_requested?: number;
+  room_id?: string | null;
   room_ids?: string[];
   preferred_room_type?: string | null;
   preferred_categories?: Record<string, number> | null;
@@ -51,7 +57,18 @@ export type Booking = {
   checkin_details?: CheckinDetails | null;
 };
 
-export type BookingsResponse = { bookings: Booking[] };
+/** Per-branch Wi-Fi and welcome text, keyed by location key, for the messages sent to guests. */
+export type WifiFloor = { floor: string; wifi_name: string; wifi_password: string };
+export type WelcomeInfo = {
+  name: string;
+  wifi_name: string;
+  wifi_password: string;
+  /** Wi-Fi by floor; a room's Floor picks the entry. The two fields above are the fallback. */
+  wifi_floors?: WifiFloor[];
+  welcome_message: string;
+};
+
+export type BookingsResponse = { bookings: Booking[]; welcome?: Record<string, WelcomeInfo>; /** Floor of each room, by room id. */ room_levels?: Record<string, string> };
 export type BookingResponse = { booking: Booking };
 
 export type OutletOption = { id?: string; location_key: string; name?: string };
@@ -67,10 +84,35 @@ export type BillingOrder = {
   items?: BillingOrderItem[];
 };
 
+export type GstLine = {
+  kind: "ROOM" | "FOOD";
+  description: string;
+  taxable: number;
+  /** Total GST rate in percent; CGST and SGST are each half. */
+  rate: number;
+  cgst: number;
+  sgst: number;
+  tariff: number;
+};
+
+export type GstSummary = {
+  lines: GstLine[];
+  taxable: number;
+  cgst: number;
+  sgst: number;
+  gst: number;
+  roundOff: number;
+  total: number;
+};
+
 export type BillingSummary = {
   booking: Booking;
   foodTotal: number;
   roomTotal: number;
+  /** Room plus food before GST. */
+  subtotal: number;
+  gst: GstSummary;
+  /** Total payable: GST included and rounded to the rupee. */
   grandTotal: number;
   orders: BillingOrder[];
 };
@@ -79,6 +121,7 @@ export type DocumentImage = { data_url: string; file_name?: string; mime_type?: 
 
 export type CheckinGuest = {
   full_name: string;
+  phone?: string | null;
   document_type: string;
   document_number: string;
   document_image?: DocumentImage | null;

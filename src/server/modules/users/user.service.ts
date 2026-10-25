@@ -6,6 +6,7 @@ import { mongoConnection } from "../../mongo";
 import { signSession, type AuthenticatedUser } from "../../session";
 import { stringifyId, toObjectId } from "../../utils/objectId";
 import { assignedRoomIds, isCheckinLocked } from "../../utils/roomAssignments";
+import { parseImageDataUrl, r2 } from "../../storage/r2";
 
 /**
  * Dedicated collection. A plain `users` collection can already exist in a shared database with
@@ -28,8 +29,11 @@ type UserDocument = {
   saved_id?: {
     document_type?: string;
     document_number?: string;
+    /** Sealed values written before R2; new saves keep the image in the bucket and only its key here. */
     document_image?: string;
     signature?: string;
+    document_image_key?: string;
+    signature_key?: string;
     updated_at?: Date;
   };
 };
@@ -142,14 +146,31 @@ const ensureIndexes = () => {
   return indexesReady;
 };
 
+const savedFolder = (userId: ObjectId | string) => `Bookings/saved-profiles/${String(userId)}`;
+
+/** Stored as a plain image so it opens in the bucket. Returns the new key and removes the file it replaces. */
+const putSavedImage = async (userId: ObjectId, name: "document-image" | "signature", dataUrl: string, oldKey?: string) => {
+  const { mimeType, extension, bytes } = parseImageDataUrl(dataUrl);
+  const key = `${savedFolder(userId)}/${name}.${extension}`;
+  await r2.put(key, bytes, mimeType);
+  if (oldKey && oldKey !== key) await r2.remove(oldKey);
+  return key;
+};
+
+/** Image from R2, or the sealed copy in Mongo for details saved before R2. */
+const readSavedImage = async (key: string | undefined, legacy: string | undefined): Promise<string> => {
+  if (key) return (await r2.getDataUrl(key)) ?? "";
+  return unseal(legacy) ?? "";
+};
+
 const summariseSaved = (doc: UserDocument): UserProfile["saved"] => {
   const saved = doc.saved_id;
   const number = unseal(saved?.document_number) ?? "";
   return {
     documentType: saved?.document_type ?? null,
     documentLast4: number ? number.replace(/\s/g, "").slice(-4) : null,
-    hasDocumentImage: Boolean(unseal(saved?.document_image)),
-    hasSignature: Boolean(unseal(saved?.signature)),
+    hasDocumentImage: Boolean(saved?.document_image_key || unseal(saved?.document_image)),
+    hasSignature: Boolean(saved?.signature_key || unseal(saved?.signature)),
   };
 };
 
@@ -259,8 +280,8 @@ export const userService = {
     return {
       documentType: saved.document_type ?? "",
       documentNumber: unseal(saved.document_number) ?? "",
-      documentImageDataUrl: unseal(saved.document_image) ?? "",
-      signatureDataUrl: unseal(saved.signature) ?? "",
+      documentImageDataUrl: await readSavedImage(saved.document_image_key, saved.document_image),
+      signatureDataUrl: await readSavedImage(saved.signature_key, saved.signature),
       updatedAt: saved.updated_at ? new Date(saved.updated_at).toISOString() : null,
     };
   },
@@ -285,13 +306,20 @@ export const userService = {
     const set: Record<string, unknown> = {};
     const unset: Record<string, ""> = {};
     const clear = Array.isArray(input.clear) ? input.clear.map(String) : [];
+    const current = ((await (await collection()).findOne({ _id: id }, { projection: { saved_id: 1 } })) as UserDocument | null)?.saved_id;
 
     if (clear.includes("document")) {
       unset["saved_id.document_type"] = "";
       unset["saved_id.document_number"] = "";
       unset["saved_id.document_image"] = "";
+      unset["saved_id.document_image_key"] = "";
+      if (current?.document_image_key) await r2.remove(current.document_image_key);
     }
-    if (clear.includes("signature")) unset["saved_id.signature"] = "";
+    if (clear.includes("signature")) {
+      unset["saved_id.signature"] = "";
+      unset["saved_id.signature_key"] = "";
+      if (current?.signature_key) await r2.remove(current.signature_key);
+    }
 
     if (input.documentType !== undefined || input.documentNumber !== undefined) {
       const type = String(input.documentType ?? "");
@@ -305,15 +333,28 @@ export const userService = {
       set["saved_id.document_number"] = seal(compact);
     }
     if (input.documentImageDataUrl !== undefined) {
-      set["saved_id.document_image"] = seal(dataUrl(input.documentImageDataUrl, "ID photo", MAX_DOCUMENT_IMAGE_CHARS));
+      set["saved_id.document_image_key"] = await putSavedImage(
+        id,
+        "document-image",
+        dataUrl(input.documentImageDataUrl, "ID photo", MAX_DOCUMENT_IMAGE_CHARS),
+        current?.document_image_key,
+      );
+      unset["saved_id.document_image"] = "";
     }
     if (input.signatureDataUrl !== undefined) {
-      set["saved_id.signature"] = seal(dataUrl(input.signatureDataUrl, "Signature", MAX_SIGNATURE_CHARS));
+      set["saved_id.signature_key"] = await putSavedImage(
+        id,
+        "signature",
+        dataUrl(input.signatureDataUrl, "Signature", MAX_SIGNATURE_CHARS),
+        current?.signature_key,
+      );
+      unset["saved_id.signature"] = "";
     }
     if (Object.keys(set).length === 0 && Object.keys(unset).length === 0) {
       throw new HttpError(400, "Nothing to save");
     }
 
+    for (const path of Object.keys(set)) delete unset[path]; // Mongo rejects one path in both operators
     set["saved_id.updated_at"] = new Date();
     set.updatedAt = new Date();
     const update: Record<string, unknown> = { $set: set };

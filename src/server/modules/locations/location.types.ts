@@ -4,6 +4,8 @@ export type ValidateLocationRequest = {
   code?: string;
   type?: LocationType;
   outletId?: string;
+  /** The stay's 6-digit check-in ID. Required to open a room. */
+  checkinId?: string;
 };
 
 export type OutletSummary = {
@@ -37,5 +39,7 @@ export type ValidateLocationResponse =
       location?: LocationSummary | null;
       outlet?: OutletSummary | null;
       booking?: BookingSummary | null;
+      /** A room was found but the caller has not proven they are its guest yet. */
+      requiresCheckinId?: boolean;
       message?: string;
     };

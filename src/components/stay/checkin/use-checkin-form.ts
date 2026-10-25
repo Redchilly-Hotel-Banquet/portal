@@ -1,6 +1,7 @@
 "use client";
 
 import { useReducer } from "react";
+import { optionalPhoneError, tenDigitPhone } from "@/lib/phone";
 import {
   DOCUMENT_TYPES,
   type CheckinBooking,
@@ -30,6 +31,7 @@ const nextKey = () => `guest-${++counter}`;
 export const blankGuest = (): GuestEntry => ({
   key: nextKey(),
   fullName: "",
+  phone: "",
   documentType: DOCUMENT_TYPES[0].value,
   documentNumber: "",
   imageDataUrl: "",
@@ -69,12 +71,14 @@ function prefill(booking: CheckinBooking, details: CheckinDetails | null): Parti
   const count = Math.max(Math.floor(Number(booking.number_of_guests ?? 1)) || 1, 1);
   const guests: GuestEntry[] = Array.from({ length: count }, (_, index) => {
     const g = saved[index];
-    if (!g) return blankGuest();
+    if (!g) return index === 0 ? { ...blankGuest(), phone: tenDigitPhone(booking.guest_phone) ?? "" } : blankGuest();
     const image = g.document_image?.data_url ?? "";
     const signature = g.signature_image?.data_url ?? "";
     return {
       key: nextKey(),
       fullName: g.full_name ?? "",
+      // The booker is guest 1, so their booking phone is the natural starting point.
+      phone: g.phone ?? (index === 0 ? tenDigitPhone(booking.guest_phone) ?? "" : ""),
       documentType: g.document_type || DOCUMENT_TYPES[0].value,
       documentNumber: g.document_number ?? "",
       imageDataUrl: image,
@@ -143,6 +147,8 @@ export function validateGuests(guests: GuestEntry[]): CheckinErrors {
   const errors: CheckinErrors = {};
   guests.forEach((guest) => {
     if (!guest.fullName.trim()) errors[`${guest.key}.name`] = "Enter the guest's full name.";
+    const phoneErr = optionalPhoneError(guest.phone);
+    if (phoneErr) errors[`${guest.key}.phone`] = phoneErr;
     const number = guest.documentNumber.trim();
     if (!number) errors[`${guest.key}.number`] = "Enter the document number.";
     else if (guest.documentType === "Aadhar Card" && number.replace(/\s/g, "").length !== 12)

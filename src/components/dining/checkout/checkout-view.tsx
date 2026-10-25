@@ -21,7 +21,7 @@ import { errorMessage, locationLabel } from "../utils";
 type PlaceOrderBody = {
   outletId: string;
   roomTableId: string | null;
-  bookingId?: string;
+  checkinId?: string;
   specialInstructions: string;
   items: { id: string; quantity: number; price: number; notes?: string }[];
   subtotal: number;
@@ -53,11 +53,11 @@ export function CheckoutView() {
       const data = await apiPost<{ orderId: string; bookingId?: string | null }, PlaceOrderBody>("/public/orders", {
         outletId: session.outletId,
         roomTableId: session.id || null,
-        bookingId: session.bookingId,
+        checkinId: session.checkinId,
         specialInstructions: instructions.trim(),
         items: cart.items.map((i) => ({ id: i.id, quantity: i.quantity, price: i.price, notes: i.notes })),
         subtotal: cart.total,
-      });
+      }, "user");
 
       setPlaced(true);
       cart.clear();

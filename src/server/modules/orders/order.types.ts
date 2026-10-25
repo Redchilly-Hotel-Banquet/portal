@@ -8,7 +8,8 @@ export type CreateOrderItem = {
 export type CreateOrderRequest = {
   outletId: string;
   roomTableId?: string;
-  bookingId?: string;
+  /** Proof of the stay for room orders: the 6-digit check-in ID. */
+  checkinId?: string;
   specialInstructions?: string;
   items: CreateOrderItem[];
   subtotal: number;
@@ -21,6 +22,7 @@ export type CreateOrderResponse = {
 
 export type GetGuestOrdersRequest = {
   bookingId: string;
+  checkinId?: string;
 };
 
 export type GetGuestOrdersResponse = {
@@ -30,6 +32,7 @@ export type GetGuestOrdersResponse = {
 export type GetOrderRequest = {
   orderId: string;
   bookingId?: string;
+  checkinId?: string;
 };
 
 export type AdminManageOrdersRequest = {
