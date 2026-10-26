@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { getAdminScopes } from "@/hooks/useAdminAccess";
 import { Loader2, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { formatDateTime, formatINR } from "@/components/admin/format";
@@ -33,6 +34,9 @@ function Row({ label, children, strong }: { label: string; children: React.React
 
 export function BookingCharges({ booking, billing, loading, error }: Props) {
   const [draft, setDraft] = useState<string | null>(null);
+  // Room prices are an administrator's call.
+  const [canEditPrice, setCanEditPrice] = useState(false);
+  useEffect(() => setCanEditPrice(getAdminScopes().includes("admin")), []);
   const mutation = useUpdateAmount(() => setDraft(null));
 
   const save = () => {
@@ -52,6 +56,7 @@ export function BookingCharges({ booking, billing, loading, error }: Props) {
           {draft === null ? (
             <span className="flex items-center gap-2">
               <Money value={bookingTotal(booking)} className="font-medium" />
+              {canEditPrice ? (
               <Button
                   variant="ghost"
                   size="icon"
@@ -61,6 +66,7 @@ export function BookingCharges({ booking, billing, loading, error }: Props) {
                 >
                   <Pencil className="h-4 w-4" strokeWidth={1.75} aria-hidden />
               </Button>
+              ) : null}
             </span>
           ) : (
             <span className="flex items-center gap-2">

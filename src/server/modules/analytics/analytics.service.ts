@@ -1,6 +1,8 @@
 import { mongoConnection } from "../../mongo";
 import { HttpError } from "../../httpError";
 import { AuthenticatedUser } from "../../session";
+import { canAccessOutlet, outletFilter } from "../../utils/access";
+import { businessDayStart } from "../../utils/dates";
 
 type AnalyticsBucket = {
   outlet_id: string;
@@ -68,6 +70,61 @@ export class AnalyticsService {
     if (!user.roles.includes("admin")) {
       throw new HttpError(403, "Insufficient permissions to view analytics");
     }
+    return this.compute(user, request);
+  }
+
+  /**
+   * The dashboard cards. Each role gets only its own figures, for the branches the account was given:
+   * administrators the business totals, the kitchen its orders and menu, reception its bookings and rooms.
+   */
+  async getOverview(user: AuthenticatedUser) {
+    const db = mongoConnection.getDb();
+    const scope = outletFilter(user);
+    const result: {
+      admin?: Awaited<ReturnType<AnalyticsService["compute"]>>;
+      kitchen?: { ordersToday: number; ordersTotal: number; openOrders: number; sales: number; dishesAvailable: number; dishesTotal: number };
+      rooms?: { activeBookings: number; checkedIn: number; awaiting: number; bookingsTotal: number; rooms: number; tables: number };
+    } = {};
+
+    if (user.roles.includes("admin")) {
+      result.admin = await this.compute(user, {});
+      return result;
+    }
+
+    if (user.roles.includes("kitchen")) {
+      const orders = db.collection("orders");
+      const dayStart = businessDayStart();
+      const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+      const today = { ...scope, created_at: { $gte: dayStart, $lt: dayEnd } };
+      const [ordersToday, ordersTotal, openOrders, sales, dishesAvailable, dishesTotal] = await Promise.all([
+        orders.countDocuments(today),
+        orders.countDocuments(scope),
+        orders.countDocuments({ ...today, status: { $in: ["PENDING", "ACCEPTED", "PREPARING", "READY"] } }),
+        orders
+          .aggregate([{ $match: scope }, { $group: { _id: null, total: { $sum: { $toDouble: { $ifNull: ["$total", "$subtotal"] } } } } }])
+          .toArray(),
+        db.collection("menu_items").countDocuments({ ...scope, is_available: { $ne: false } }),
+        db.collection("menu_items").countDocuments(scope),
+      ]);
+      result.kitchen = { ordersToday, ordersTotal, openOrders, sales: toNumber(sales[0]?.total), dishesAvailable, dishesTotal };
+    }
+
+    if (user.roles.includes("rooms")) {
+      const bookings = db.collection("bookings");
+      const [activeBookings, checkedIn, awaiting, bookingsTotal, rooms, tables] = await Promise.all([
+        bookings.countDocuments({ ...scope, status: { $in: ["CONFIRMED", "CHECKED_IN"] } }),
+        bookings.countDocuments({ ...scope, status: "CHECKED_IN" }),
+        bookings.countDocuments({ ...scope, status: "PENDING" }),
+        bookings.countDocuments(scope),
+        db.collection("rooms_tables").countDocuments({ ...scope, is_active: { $ne: false }, type: { $in: ["ROOM", "HOTEL_ROOM"] } }),
+        db.collection("rooms_tables").countDocuments({ ...scope, is_active: { $ne: false }, type: "TABLE" }),
+      ]);
+      result.rooms = { activeBookings, checkedIn, awaiting, bookingsTotal, rooms, tables };
+    }
+    return result;
+  }
+
+  async compute(user: AuthenticatedUser, request: AnalyticsRequest) {
 
     let range: { from: Date; to: Date } | null = null;
     if (request.from || request.to) {
@@ -89,7 +146,7 @@ export class AnalyticsService {
     const bookingsCollection = db.collection("bookings");
     const roomsCollection = db.collection("rooms_tables");
 
-    const outlets = await outletsCollection.find({}).toArray();
+    const outlets = (await outletsCollection.find({}).toArray()).filter((outlet: any) => canAccessOutlet(user, outlet.location_key));
     const buckets = new Map<string, AnalyticsBucket>();
 
     const initialiseBucket = (outlet: any) => {
@@ -116,11 +173,8 @@ export class AnalyticsService {
 
     outlets.forEach(initialiseBucket);
 
-    const midnight = (() => {
-      const d = new Date();
-      d.setHours(0, 0, 0, 0);
-      return d;
-    })();
+    // "Today" is the kitchen's trading day (from 3 am India time), the same one the Orders screen shows.
+    const midnight = businessDayStart();
 
     const outletFilter = !user.outlets.includes("all") ? { outlet_id: { $in: user.outlets } } : {};
 

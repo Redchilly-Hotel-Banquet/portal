@@ -3,6 +3,7 @@ import { HttpError } from "./httpError";
 import { mongoConnection } from "./mongo";
 import { userService } from "./modules/users/user.service";
 import { AuthenticatedUser, assertRoles, readSession } from "./session";
+import { resolveOutlets } from "./utils/access";
 
 type Context = { body: any; user: AuthenticatedUser | null; request: Request };
 
@@ -51,6 +52,8 @@ export const route =
         else if (needsSession) throw new HttpError(401, "Account is no longer active");
         else user = null;
       }
+      // Staff may only touch the branches they were given, matched to the real branch keys.
+      if (needsSession && user) user = { ...user, outlets: await resolveOutlets(user.outlets) };
       if (options.roles) assertRoles(user!, options.roles);
       const body = await readBody(request);
       const result = await handler({ body, user, request });

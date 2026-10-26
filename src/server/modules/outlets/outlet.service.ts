@@ -3,6 +3,8 @@ import { HttpError } from "../../httpError";
 import { normalizeDocument } from "../../utils/normalizers";
 import { stringifyId, toObjectId } from "../../utils/objectId";
 import { ManageOutletRequest, ManageOutletAction } from "./outlet.types";
+import type { AuthenticatedUser } from "../../session";
+import { assertAdmin, assertOutlet } from "../../utils/access";
 
 type FlexibleId = string | import("mongodb").ObjectId;
 
@@ -120,16 +122,21 @@ export class OutletService {
     };
   }
 
-  async manage(request: ManageOutletRequest) {
+  async manage(request: ManageOutletRequest, user: AuthenticatedUser) {
     const db = mongoConnection.getDb();
     const outletsCollection = db.collection<OutletDocument>("outlets");
 
     switch (request.action) {
       case "list": {
-        const outlets = await outletsCollection.find({}).sort({ sort_order: 1, location_key: 1 }).toArray();
+        assertAdmin(user, "manage branches");
+        const scope = user.outlets.includes("all") ? {} : { location_key: { $in: user.outlets } };
+        const outlets = await outletsCollection.find(scope).sort({ sort_order: 1, location_key: 1 }).toArray();
         return { outlets };
       }
       case "create": {
+        assertAdmin(user, "add branches");
+        // A new branch is a change for the whole business, so only all-branch administrators make one.
+        if (!user.outlets.includes("all")) throw new HttpError(403, "Only an all-branch administrator can add branches.");
         if (!request.data || typeof request.data !== "object") {
           throw new HttpError(400, "data is required for create action");
         }
@@ -151,12 +158,18 @@ export class OutletService {
         if (Object.keys(payload).length === 1 && "updated_at" in payload) {
           throw new HttpError(400, "No valid fields to update");
         }
+        assertAdmin(user, "edit branches");
         const filter = { _id: resolveOutletId(request.id) };
+        const current = await outletsCollection.findOne(filter);
+        if (!current) throw new HttpError(404, "Outlet not found");
+        assertOutlet(user, current.location_key);
         const { matchedCount } = await outletsCollection.updateOne(filter, { $set: payload });
         if (!matchedCount) throw new HttpError(404, "Outlet not found");
         return { success: true };
       }
       case "delete": {
+        assertAdmin(user, "remove branches");
+        if (!user.outlets.includes("all")) throw new HttpError(403, "Only an all-branch administrator can remove branches.");
         if (!request.id) throw new HttpError(400, "id is required for delete action");
         const filter = { _id: resolveOutletId(request.id) };
         const { deletedCount } = await outletsCollection.deleteOne(filter);

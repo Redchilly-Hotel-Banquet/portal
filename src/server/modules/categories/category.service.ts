@@ -3,6 +3,8 @@ import { HttpError } from "../../httpError";
 import { normalizeDocument } from "../../utils/normalizers";
 import { stringifyId, toObjectId } from "../../utils/objectId";
 import { ManageCategoryRequest } from "./category.types";
+import type { AuthenticatedUser } from "../../session";
+import { assertOutlet, outletFilter } from "../../utils/access";
 
 type FlexibleId = string | import("mongodb").ObjectId;
 
@@ -21,13 +23,13 @@ const resolveCategoryId = (value: unknown): FlexibleId => {
 };
 
 export class CategoryService {
-  async manage(request: ManageCategoryRequest) {
+  async manage(request: ManageCategoryRequest, user: AuthenticatedUser) {
     const db = mongoConnection.getDb();
     const collection = db.collection<CategoryDocument>("menu_categories");
 
     switch (request.action) {
       case "list": {
-        const categories = await collection.find({}).sort({ sort_order: 1 }).toArray();
+        const categories = await collection.find(outletFilter(user)).sort({ sort_order: 1 }).toArray();
         return categories.map((item) => {
           const normalized = normalizeDocument(item);
           return { ...normalized, id: normalized?.id ?? stringifyId(item?._id) ?? "" };
@@ -37,6 +39,7 @@ export class CategoryService {
         if (!request.data || typeof request.data !== "object") {
           throw new HttpError(400, "data is required for create action");
         }
+        assertOutlet(user, request.data.outlet_id);
         const payload = {
           ...request.data,
           created_at: new Date(),
@@ -54,6 +57,10 @@ export class CategoryService {
         if (!request.data || typeof request.data !== "object") {
           throw new HttpError(400, "data is required for update action");
         }
+        const existing = await collection.findOne({ _id: resolveCategoryId(request.id) });
+        if (!existing) throw new HttpError(404, "Category not found");
+        assertOutlet(user, existing.outlet_id);
+        if (request.data.outlet_id !== undefined) assertOutlet(user, request.data.outlet_id);
         await collection.updateOne(
           { _id: resolveCategoryId(request.id) },
           { $set: request.data }
@@ -62,6 +69,8 @@ export class CategoryService {
       }
       case "delete": {
         if (!request.id) throw new HttpError(400, "id is required for delete action");
+        const doomed = await collection.findOne({ _id: resolveCategoryId(request.id) });
+        if (doomed) assertOutlet(user, doomed.outlet_id);
         await collection.deleteOne({ _id: resolveCategoryId(request.id) });
         return { success: true };
       }

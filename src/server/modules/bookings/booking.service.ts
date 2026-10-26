@@ -6,6 +6,7 @@ import { normalizeDocument } from "../../utils/normalizers";
 import { stringifyId, toObjectId } from "../../utils/objectId";
 import { assignedRoomIds, isCheckinLocked } from "../../utils/roomAssignments";
 import { ensureUniqueCheckinId } from "../../utils/checkinId";
+import { assertAdmin, assertOutlet } from "../../utils/access";
 import { computeGst, type GstSummary } from "../../utils/gst";
 import { PAYMENT_MODE_VALUES, type PaymentLine } from "../../../lib/payment-modes";
 import {
@@ -657,12 +658,23 @@ export class BookingService {
           throw new HttpError(400, "id and status are required");
         }
 
+        const nextStatus = String(request.status).toUpperCase();
+        if (!["PENDING", "CONFIRMED", "CHECKED_IN", "CANCELLED"].includes(nextStatus)) {
+          // Check-out records the payment and finalises the bill, so it only happens through the checkout form.
+          throw new HttpError(400, nextStatus === "CHECKED_OUT" ? "Use Check out to finish a stay." : "Invalid status");
+        }
+        const current = await bookingsCollection.findOne({ _id: resolveDocumentId(request.id, "Invalid booking id") });
+        if (!current) throw new HttpError(404, "Booking not found");
+        assertOutlet(user, current.outlet_id);
+        if (String(current.status).toUpperCase() === "CHECKED_OUT") {
+          throw new HttpError(409, "A checked-out booking cannot be changed.");
+        }
+
         const patch: Record<string, unknown> = {
-          status: request.status,
+          status: nextStatus,
           updated_at: new Date(),
         };
-        if (request.status === "CHECKED_IN") patch.checked_in_at = new Date();
-        if (request.status === "CHECKED_OUT") patch.checked_out_at = new Date();
+        if (nextStatus === "CHECKED_IN") patch.checked_in_at = new Date();
 
         const filter = {
           _id: resolveDocumentId(request.id, "Invalid booking id"),
@@ -701,10 +713,15 @@ export class BookingService {
           throw new HttpError(400, "id is required");
         }
 
+        // Prices are an administrator's call.
+        assertAdmin(user, "change the room charges");
         const totalAmount = Number(request.totalAmount ?? NaN);
         if (!Number.isFinite(totalAmount) || totalAmount < 0) {
           throw new HttpError(400, "totalAmount must be a positive number");
         }
+        const target = await bookingsCollection.findOne({ _id: resolveDocumentId(request.id, "Invalid booking id") });
+        if (!target) throw new HttpError(404, "Booking not found");
+        assertOutlet(user, target.outlet_id);
 
         const filter = {
           _id: resolveDocumentId(request.id, "Invalid booking id"),
@@ -791,6 +808,7 @@ export class BookingService {
       if (!booking) {
         throw new HttpError(404, "Booking not found");
       }
+      if (user) assertOutlet(user, booking.outlet_id);
 
       const availableRooms = await computeAvailableRooms(db, booking);
 
@@ -840,6 +858,8 @@ export class BookingService {
           "Unable to locate the booking. Please refresh and try again.",
         );
       }
+
+      if (isPrivileged && user) assertOutlet(user, booking.outlet_id);
 
       const bookingStatus = normaliseString(booking.status).toUpperCase();
       const isBookingReady =
@@ -1333,6 +1353,7 @@ export class BookingService {
     if (!booking) {
       throw new HttpError(404, "Booking not found");
     }
+    assertOutlet(user, booking.outlet_id);
 
     const checkout = request.action === "checkout";
     const payments = checkout ? parsePayments(request.payments) : [];

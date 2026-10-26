@@ -5,6 +5,7 @@ import { mongoConnection } from "../../mongo";
 import { HttpError } from "../../httpError";
 import { signSession } from "../../session";
 import { stringifyId } from "../../utils/objectId";
+import { resolveOutlets } from "../../utils/access";
 import { AuthUser, LoginRequest, LoginResponse } from "./auth.types";
 
 const parseList = (raw: unknown, fallback: string, lowercase: boolean): string[] => {
@@ -29,7 +30,11 @@ const safeEqual = (a: string, b: string) => {
   return left.length === right.length && timingSafeEqual(left, right);
 };
 
-const issueToken = (user: AuthUser): LoginResponse => ({ token: signSession(user), user });
+/** The token carries the real branch keys, so the screens and the API agree on which branches an account may use. */
+const issueToken = async (user: AuthUser): Promise<LoginResponse> => {
+  const scoped = { ...user, outlets: await resolveOutlets(user.outlets) };
+  return { token: signSession(scoped), user: scoped };
+};
 
 export const authService = {
   async login(payload: LoginRequest): Promise<LoginResponse> {
@@ -48,7 +53,7 @@ export const authService = {
 
     if (!userDoc) {
       if (usedFallback) {
-        return issueToken({ id: "default-admin", name: "Admin", roles: ["admin"], outlets: ["all"] });
+        return await issueToken({ id: "default-admin", name: "Admin", roles: ["admin"], outlets: ["all"] });
       }
       throw new HttpError(401, "Invalid credentials");
     }
@@ -57,6 +62,6 @@ export const authService = {
     if (!usedFallback && !(stored && safeEqual(password, stored))) {
       throw new HttpError(401, "Invalid credentials");
     }
-    return issueToken(buildUser(userDoc));
+    return await issueToken(buildUser(userDoc));
   }
 };

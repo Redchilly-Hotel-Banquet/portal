@@ -1,5 +1,6 @@
 import { ObjectId } from "mongodb";
 import { HttpError } from "../../httpError";
+import { canAccessOutlet } from "../../utils/access";
 import { mongoConnection } from "../../mongo";
 import type { AuthenticatedUser } from "../../session";
 import { stringifyId, toObjectId } from "../../utils/objectId";
@@ -19,8 +20,7 @@ type PhoneOrderRequest = {
 const MAX_QTY = 50;
 const MAX_LINES = 40;
 
-const outletAllowed = (user: AuthenticatedUser, outletId: unknown) =>
-  user.outlets.includes("all") || user.outlets.includes(String(outletId ?? ""));
+const outletAllowed = canAccessOutlet;
 
 /**
  * Food a guest orders by phone. Reception or the kitchen records it against the guest's booking so it

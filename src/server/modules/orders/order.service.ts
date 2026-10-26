@@ -1,5 +1,7 @@
 import { ObjectId } from "mongodb";
 import { assertCheckinId, findCheckedInBookingForRoom, ownsBooking } from "../../utils/checkinId";
+import { assertOutlet, outletFilter } from "../../utils/access";
+import { businessDayStart } from "../../utils/dates";
 import { mongoConnection } from "../../mongo";
 import { HttpError } from "../../httpError";
 import { AuthenticatedUser } from "../../session";
@@ -306,14 +308,8 @@ export class OrderService {
 
     switch (payload.action) {
       case "list": {
-        const now = new Date();
-        const dayStart = new Date(now);
-        dayStart.setHours(3, 0, 0, 0);
-        if (now < dayStart) {
-          dayStart.setDate(dayStart.getDate() - 1);
-        }
-        const dayEnd = new Date(dayStart);
-        dayEnd.setDate(dayEnd.getDate() + 1);
+        const dayStart = businessDayStart();
+        const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
 
         const filter: Record<string, unknown> = {
           created_at: {
@@ -322,9 +318,7 @@ export class OrderService {
           },
         };
 
-        if (!user.outlets.includes("all")) {
-          filter.outlet_id = { $in: user.outlets };
-        }
+        Object.assign(filter, outletFilter(user));
 
         const orders = await ordersCollection.find(filter).sort({ created_at: -1 }).toArray();
         // Bulk lookups rather than three queries per order; the kitchen screen polls this list.
@@ -352,7 +346,9 @@ export class OrderService {
           itemsByOrder.set(String(item.order_id), list);
         }
         for (const order of orders) {
-          if (order.room_table_id) order.rooms_tables = roomsById.get(String(order.room_table_id)) ?? null;
+          // Only where to deliver it: the kitchen has no use for a room's rates or amenities.
+          const room = order.room_table_id ? roomsById.get(String(order.room_table_id)) : null;
+          if (order.room_table_id) order.rooms_tables = room ? { _id: room._id, type: room.type, code: room.code } : null;
           order.order_items = itemsByOrder.get(serializeId(order._id) ?? "") ?? [];
         }
         return orders;
@@ -361,7 +357,13 @@ export class OrderService {
         if (!payload.id || !payload.status) {
           throw new HttpError(400, "id and status are required");
         }
+        if (!["PENDING", "ACCEPTED", "PREPARING", "READY", "DELIVERED"].includes(String(payload.status))) {
+          throw new HttpError(400, "Invalid status");
+        }
         const filter = { _id: resolveCollectionId(payload.id, "Invalid order id") };
+        const target = await ordersCollection.findOne(filter);
+        if (!target) throw new HttpError(404, "Order not found");
+        assertOutlet(user, target.outlet_id);
         await ordersCollection.updateOne(filter, {
           $set: {
             status: payload.status,

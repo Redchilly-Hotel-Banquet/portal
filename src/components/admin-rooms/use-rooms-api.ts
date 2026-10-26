@@ -16,7 +16,7 @@ import {
 } from "./types";
 import { errorMessage } from "./utils";
 
-const ROOMS_KEY = ["admin-rooms"];
+export const ROOMS_KEY = ["admin-rooms"];
 const OUTLETS_KEY = ["validated-location"];
 const PRICING_KEY = ["room-pricing-rules"];
 

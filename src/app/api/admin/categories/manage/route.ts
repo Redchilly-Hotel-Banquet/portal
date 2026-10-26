@@ -8,7 +8,7 @@ export const POST = route(
     if (body?.action !== "list" && !user?.roles.includes("admin")) {
       throw new HttpError(403, "Insufficient permissions");
     }
-    return categoryService.manage(body);
+    return categoryService.manage(body, user!);
   },
   { roles: ["admin", "kitchen"] },
 );

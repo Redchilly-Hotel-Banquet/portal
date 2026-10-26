@@ -1,5 +1,6 @@
 "use client";
 
+import { getAdminOutlets, hasOutletAccess } from "@/hooks/useAdminAccess";
 import { useMemo, useState } from "react";
 import { CalendarPlus, RefreshCw } from "lucide-react";
 import { AdminShell } from "@/components/admin/admin-shell";
@@ -24,7 +25,9 @@ export function BookingsConsole() {
   const [createOpen, setCreateOpen] = useState(false);
 
   const bookings = bookingsQuery.data?.bookings;
-  const outlets = outletsQuery.data ?? [];
+  // Staff assigned to some branches can only make bookings in those.
+  const allowedOutlets = getAdminOutlets();
+  const outlets = (outletsQuery.data ?? []).filter((outlet) => hasOutletAccess(allowedOutlets, outlet.location_key));
 
   // Everything except the status tab, so tab counts reflect the other active filters.
   const scoped = useMemo(() => {

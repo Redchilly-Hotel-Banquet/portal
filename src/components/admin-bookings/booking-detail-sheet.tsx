@@ -96,7 +96,7 @@ export function BookingDetailSheet({ booking, welcome, roomLevels, onClose, onMa
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {BOOKING_STATUSES.map((option) => (
+                    {BOOKING_STATUSES.filter((option) => option.value !== "CHECKED_OUT" || booking.status === "CHECKED_OUT").map((option) => (
                       <SelectItem key={option.value} value={option.value}>
                         {option.label}
                       </SelectItem>

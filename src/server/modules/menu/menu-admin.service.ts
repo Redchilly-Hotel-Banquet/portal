@@ -3,6 +3,8 @@ import { HttpError } from "../../httpError";
 import { normalizeDocument } from "../../utils/normalizers";
 import { stringifyId, toObjectId } from "../../utils/objectId";
 import { parseImageDataUrl, r2 } from "../../storage/r2";
+import type { AuthenticatedUser } from "../../session";
+import { assertAdmin, assertOutlet, isAdmin, outletFilter } from "../../utils/access";
 import { ObjectId } from "mongodb";
 
 type ManageMenuItemRequest = {
@@ -84,17 +86,19 @@ const present = (doc: Record<string, unknown>) => {
 };
 
 export const menuAdminService = {
-  async manage(request: ManageMenuItemRequest) {
+  async manage(request: ManageMenuItemRequest, user: AuthenticatedUser) {
     const collection = mongoConnection.getDb().collection<{ _id?: Id } & Record<string, unknown>>("menu_items");
 
     switch (request.action) {
       case "list": {
-        const docs = await collection.find({}).sort({ created_at: -1 }).toArray();
+        const docs = await collection.find(outletFilter(user)).sort({ created_at: -1 }).toArray();
         const items = docs.map(present);
         return { items, page: 1, pageSize: items.length, total: items.length, totalPages: 1 };
       }
       case "create": {
+        assertAdmin(user, "add menu items");
         const data = sanitise(request.data ?? {}, true);
+        assertOutlet(user, data.outlet_id);
         const now = new Date();
         const _id = new ObjectId();
         if (typeof data.image_url === "string") data.image_url = await storeImage(_id, data.image_url);
@@ -104,10 +108,19 @@ export const menuAdminService = {
       }
       case "update": {
         if (!request.id) throw new HttpError(400, "id is required for update action");
-        const data = sanitise(request.data ?? {}, false);
         const id = resolveId(request.id);
         const existing = await collection.findOne({ _id: id });
         if (!existing) throw new HttpError(404, "Menu item not found");
+        assertOutlet(user, existing.outlet_id);
+        if (!isAdmin(user)) {
+          // Everyone else may only mark a dish available or sold out. Names, prices and photos are the administrator's.
+          const keys = Object.keys(request.data ?? {});
+          if (keys.length !== 1 || keys[0] !== "is_available") {
+            throw new HttpError(403, "Only an administrator can edit menu items. You can mark a dish available or unavailable.");
+          }
+        }
+        const data = sanitise(request.data ?? {}, false);
+        if (data.outlet_id !== undefined) assertOutlet(user, data.outlet_id);
         if (typeof data.image_url === "string") data.image_url = await storeImage(id, data.image_url);
         await collection.updateOne({ _id: id }, { $set: { ...data, updated_at: new Date() } });
         if (typeof data.image_url === "string" && data.image_url !== existing.image_url) {
@@ -117,7 +130,10 @@ export const menuAdminService = {
         return { success: true };
       }
       case "delete": {
+        assertAdmin(user, "remove menu items");
         if (!request.id) throw new HttpError(400, "id is required for delete action");
+        const target = await collection.findOne({ _id: resolveId(request.id) });
+        if (target) assertOutlet(user, target.outlet_id);
         const removed = await collection.findOneAndDelete({ _id: resolveId(request.id) });
         if (!removed) throw new HttpError(404, "Menu item not found");
         const previous = r2.keyFromPublicUrl(removed.image_url);

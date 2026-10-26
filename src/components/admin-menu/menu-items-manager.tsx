@@ -16,6 +16,7 @@ import { EmptyState } from "@/components/admin/empty-state";
 import { Money } from "@/components/admin/money";
 import { formatDate, formatNumber } from "@/components/admin/format";
 import { ApiError, apiPost } from "@/lib/apiClient";
+import { getAdminScopes } from "@/hooks/useAdminAccess";
 import { MenuItemSheet } from "./menu-item-sheet";
 import { useOutletKeys } from "./use-outlets";
 import {
@@ -33,7 +34,10 @@ const errorMessage = (e: unknown, fallback: string) => (e instanceof Error ? e.m
 
 export function MenuItemsManager() {
   const queryClient = useQueryClient();
-  const { keys: outlets, isLoading: outletsLoading } = useOutletKeys();
+  const { keys: allOutlets, isLoading: outletsLoading } = useOutletKeys();
+  // Only administrators edit the menu; everyone else switches dishes on and off for their own branches.
+  const [isAdmin, setIsAdmin] = useState(false);
+  useEffect(() => setIsAdmin(getAdminScopes().includes("admin")), []);
 
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editing, setEditing] = useState<MenuItemRecord | null>(null);
@@ -55,6 +59,11 @@ export function MenuItemsManager() {
   });
 
   const items = useMemo(() => itemsQuery.data?.items ?? [], [itemsQuery.data]);
+  // The server only returns the branches this account may see, so those are the only ones worth listing.
+  const outlets = useMemo(
+    () => (isAdmin ? allOutlets : Array.from(new Set(items.map((item) => item.outlet_id).filter((key): key is string => Boolean(key))))),
+    [isAdmin, allOutlets, items],
+  );
   const categoryNames = useMemo(
     () => Array.from(new Set((categoriesQuery.data ?? []).map((c) => c.name).filter(Boolean))),
     [categoriesQuery.data],
@@ -125,8 +134,8 @@ export function MenuItemsManager() {
     <AdminShell
       scope={["admin", "kitchen"]}
       title="Menu items"
-      description="Dishes, pricing and availability by outlet."
-      actions={<Button size="sm" onClick={openNew}><Plus aria-hidden strokeWidth={1.75} /> Add item</Button>}
+      description={isAdmin ? "Dishes, pricing and availability by outlet." : "Switch dishes on or off for your branch. Only an administrator can change the menu or prices."}
+      actions={isAdmin ? <Button size="sm" onClick={openNew}><Plus aria-hidden strokeWidth={1.75} /> Add item</Button> : undefined}
     >
       <div className="space-y-4">
         <DataToolbar
@@ -191,8 +200,8 @@ export function MenuItemsManager() {
           <EmptyState
             icon={UtensilsCrossed}
             title={items.length === 0 ? "No menu items yet" : "No items match these filters"}
-            description={items.length === 0 ? "Add the first dish to start taking orders." : "Clear a filter or search term to see more."}
-            action={items.length === 0 ? <Button onClick={openNew}><Plus aria-hidden strokeWidth={1.75} /> Add item</Button> : undefined}
+            description={items.length === 0 ? (isAdmin ? "Add the first dish to start taking orders." : "No dishes have been added for your branch yet.") : "Clear a filter or search term to see more."}
+            action={items.length === 0 && isAdmin ? <Button onClick={openNew}><Plus aria-hidden strokeWidth={1.75} /> Add item</Button> : undefined}
           />
         ) : (
           <>
@@ -211,7 +220,7 @@ export function MenuItemsManager() {
                     <TableHead className="text-right">Prep</TableHead>
                     <TableHead>Updated</TableHead>
                     <TableHead>Available</TableHead>
-                    <TableHead className="text-right"><span className="sr-only">Actions</span></TableHead>
+                    {isAdmin ? <TableHead className="text-right"><span className="sr-only">Actions</span></TableHead> : null}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -253,16 +262,18 @@ export function MenuItemsManager() {
                           aria-label={`${item.name} available`}
                         />
                       </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-1">
-                          <Button variant="ghost" size="icon" onClick={() => openEdit(item)} aria-label={`Edit ${item.name}`}>
-                            <Pencil strokeWidth={1.75} />
-                          </Button>
-                          <Button variant="ghost" size="icon" onClick={() => setDeleting(item)} aria-label={`Delete ${item.name}`}>
-                            <Trash2 className="text-destructive" strokeWidth={1.75} />
-                          </Button>
-                        </div>
-                      </TableCell>
+                      {isAdmin ? (
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1">
+                            <Button variant="ghost" size="icon" onClick={() => openEdit(item)} aria-label={`Edit ${item.name}`}>
+                              <Pencil strokeWidth={1.75} />
+                            </Button>
+                            <Button variant="ghost" size="icon" onClick={() => setDeleting(item)} aria-label={`Delete ${item.name}`}>
+                              <Trash2 className="text-destructive" strokeWidth={1.75} />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      ) : null}
                     </TableRow>
                   ))}
                 </TableBody>

@@ -1,6 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { apiPost } from "@/lib/apiClient";
+import { getAdminScopes } from "@/hooks/useAdminAccess";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -13,7 +17,7 @@ import { QrDialog } from "./qr-dialog";
 import { RoomFormSheet } from "./room-form-sheet";
 import { RoomsInventory } from "./rooms-inventory";
 import type { RoomRecord } from "./types";
-import { useOutlets, useRoomMutations, useRooms } from "./use-rooms-api";
+import { ROOMS_KEY, useOutlets, useRoomMutations, useRooms } from "./use-rooms-api";
 import { resolveOutletKey } from "./utils";
 
 export function RoomsManager() {
@@ -25,6 +29,16 @@ export function RoomsManager() {
   const [deleting, setDeleting] = useState<RoomRecord | null>(null);
   const [qrRoom, setQrRoom] = useState<RoomRecord | null>(null);
   const [pricingOpen, setPricingOpen] = useState(false);
+
+  const [canEdit, setCanEdit] = useState(false);
+  useEffect(() => setCanEdit(getAdminScopes().includes("admin")), []);
+  const queryClient = useQueryClient();
+  const toggle = useMutation({
+    mutationFn: ({ id, active }: { id: string; active: boolean }) =>
+      apiPost("/admin/rooms/manage", { action: "update", id, data: { is_active: active } }, true),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ROOMS_KEY }),
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Could not update availability."),
+  });
 
   const { save, remove } = useRoomMutations(() => {
     setFormOpen(false);
@@ -52,12 +66,14 @@ export function RoomsManager() {
     <AdminShell
       scope={["admin", "rooms"]}
       title="Rooms and tables"
-      description="Inventory, guest QR codes and seasonal rates"
+      description={canEdit ? "Inventory, guest QR codes and seasonal rates" : "Switch rooms and tables on or off for your branch. Only an administrator can edit them or change rates."}
       actions={
-        <Button onClick={() => openForm(null)}>
-          <Plus strokeWidth={1.75} aria-hidden />
-          Add room or table
-        </Button>
+        canEdit ? (
+          <Button onClick={() => openForm(null)}>
+            <Plus strokeWidth={1.75} aria-hidden />
+            Add room or table
+          </Button>
+        ) : undefined
       }
     >
       <div className="space-y-6">
@@ -71,7 +87,7 @@ export function RoomsManager() {
         <Tabs defaultValue="inventory" className="space-y-5">
           <TabsList>
             <TabsTrigger value="inventory">Inventory</TabsTrigger>
-            <TabsTrigger value="pricing">Pricing rules</TabsTrigger>
+            {canEdit ? <TabsTrigger value="pricing">Pricing rules</TabsTrigger> : null}
           </TabsList>
           <TabsContent value="inventory" className="mt-0">
             <RoomsInventory
@@ -81,14 +97,18 @@ export function RoomsManager() {
               loading={isLoading}
               error={isError ? error.message || "Inventory could not be loaded." : null}
               onAdd={() => openForm(null)}
+              canEdit={canEdit}
+              onToggleActive={(room, active) => toggle.mutate({ id: room.id, active })}
               onEdit={openForm}
               onDelete={setDeleting}
               onShowQr={setQrRoom}
             />
           </TabsContent>
-          <TabsContent value="pricing" className="mt-0">
-            <PricingPanel rooms={rooms} outlets={outlets.keys} creating={pricingOpen} onCreatingChange={setPricingOpen} />
-          </TabsContent>
+          {canEdit ? (
+            <TabsContent value="pricing" className="mt-0">
+              <PricingPanel rooms={rooms} outlets={outlets.keys} creating={pricingOpen} onCreatingChange={setPricingOpen} />
+            </TabsContent>
+          ) : null}
         </Tabs>
       </div>
 

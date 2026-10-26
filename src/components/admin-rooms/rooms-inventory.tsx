@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { BedDouble, ChevronLeft, ChevronRight, Download, Loader2, Pencil, Printer, QrCode, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -25,12 +26,15 @@ type Props = {
   loading: boolean;
   error: string | null;
   onAdd: () => void;
+  /** Administrators edit and delete; everyone else only switches rooms on and off. */
+  canEdit: boolean;
+  onToggleActive: (room: RoomRecord, active: boolean) => void;
   onEdit: (room: RoomRecord) => void;
   onDelete: (room: RoomRecord) => void;
   onShowQr: (room: RoomRecord) => void;
 };
 
-export function RoomsInventory({ rooms, outletRefs, outletKeys, loading, error, onAdd, onEdit, onDelete, onShowQr }: Props) {
+export function RoomsInventory({ rooms, outletRefs, outletKeys, loading, error, onAdd, canEdit, onToggleActive, onEdit, onDelete, onShowQr }: Props) {
   const [search, setSearch] = useState("");
   const [type, setType] = useState(ALL);
   const [outlet, setOutlet] = useState(ALL);
@@ -170,7 +174,7 @@ export function RoomsInventory({ rooms, outletRefs, outletKeys, loading, error, 
           icon={BedDouble}
           title={filtering ? "Nothing matches these filters" : "No rooms or tables yet"}
           description={filtering ? "Clear a filter or change the search to see more." : "Add your first room or table to generate its guest QR code."}
-          action={!filtering ? <Button onClick={onAdd}>Add room or table</Button> : undefined}
+          action={!filtering && canEdit ? <Button onClick={onAdd}>Add room or table</Button> : undefined}
         />
       ) : (
         <>
@@ -212,19 +216,26 @@ export function RoomsInventory({ rooms, outletRefs, outletKeys, loading, error, 
                         {room.type === "ROOM" ? <Money value={room.price_per_night} /> : "-"}
                       </td>
                       <td className="px-4 py-3">
-                        <StatusBadge status={room.is_active ? "Active" : "Inactive"} tone={room.is_active ? "success" : "muted"} />
+                        <div className="flex items-center gap-2">
+                          <Switch checked={Boolean(room.is_active)} onCheckedChange={(value) => onToggleActive(room, value)} aria-label={`${label} active`} />
+                          <StatusBadge status={room.is_active ? "Active" : "Inactive"} tone={room.is_active ? "success" : "muted"} />
+                        </div>
                       </td>
                       <td className="px-2 py-2">
                         <div className="flex justify-end">
                           <Button variant="ghost" size="icon" onClick={() => onShowQr(room)} aria-label={`QR code for ${label}`}>
                             <QrCode strokeWidth={1.75} aria-hidden />
                           </Button>
-                          <Button variant="ghost" size="icon" onClick={() => onEdit(room)} aria-label={`Edit ${label}`}>
-                            <Pencil strokeWidth={1.75} aria-hidden />
-                          </Button>
-                          <Button variant="ghost" size="icon" onClick={() => onDelete(room)} aria-label={`Delete ${label}`}>
-                            <Trash2 className="text-destructive" strokeWidth={1.75} aria-hidden />
-                          </Button>
+                          {canEdit ? (
+                            <>
+                              <Button variant="ghost" size="icon" onClick={() => onEdit(room)} aria-label={`Edit ${label}`}>
+                                <Pencil strokeWidth={1.75} aria-hidden />
+                              </Button>
+                              <Button variant="ghost" size="icon" onClick={() => onDelete(room)} aria-label={`Delete ${label}`}>
+                                <Trash2 className="text-destructive" strokeWidth={1.75} aria-hidden />
+                              </Button>
+                            </>
+                          ) : null}
                         </div>
                       </td>
                     </tr>

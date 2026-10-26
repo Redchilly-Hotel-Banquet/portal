@@ -1,3 +1,4 @@
+import { assertAdmin, assertOutlet, isAdmin, outletFilter } from "../../utils/access";
 import { mongoConnection } from "../../mongo";
 import { assignedRoomIds } from "../../utils/roomAssignments";
 import { HttpError } from "../../httpError";
@@ -557,10 +558,7 @@ export class RoomService {
 
     switch (action) {
       case "list": {
-        const filter: Record<string, unknown> = {};
-        if (!user.outlets.includes("all")) {
-          filter.outlet_id = { $in: user.outlets };
-        }
+        const filter: Record<string, unknown> = outletFilter(user);
         const roomsRaw = await roomsCollection.find(filter).sort({ created_at: -1 }).toArray();
         const rooms = roomsRaw.map((doc: Record<string, unknown>) => ({
           ...doc,
@@ -570,10 +568,12 @@ export class RoomService {
       }
 
       case "create": {
+        assertAdmin(user, "add rooms or tables");
         if (!data || typeof data !== "object") {
           throw new HttpError(400, "data payload is required");
         }
         const payloadDoc = sanitiseRoomPayload(data as Record<string, unknown>);
+        assertOutlet(user, payloadDoc.outlet_id);
         const insertResult = await roomsCollection.insertOne(payloadDoc);
         return {
           id: toStringId(insertResult.insertedId) ?? String(insertResult.insertedId),
@@ -593,7 +593,16 @@ export class RoomService {
         if (!existing) {
           throw new HttpError(404, "Room not found");
         }
+        assertOutlet(user, existing.outlet_id);
+        if (!isAdmin(user)) {
+          // Everyone else may only switch a room or table on or off; nothing else about it changes.
+          const keys = Object.keys(data as Record<string, unknown>);
+          if (keys.length !== 1 || keys[0] !== "is_active") {
+            throw new HttpError(403, "Only an administrator can edit rooms and tables. You can switch them on or off.");
+          }
+        }
         const payloadDoc = sanitiseRoomPayload({ ...existing, ...data } as Record<string, unknown>);
+        assertOutlet(user, payloadDoc.outlet_id);
         payloadDoc.created_at = existing.created_at ?? payloadDoc.created_at;
         await roomsCollection.updateOne({ _id: objectId } as Record<string, unknown>, {
           $set: {
@@ -606,6 +615,7 @@ export class RoomService {
       }
 
       case "delete": {
+        assertAdmin(user, "remove rooms or tables");
         if (!id) {
           throw new HttpError(400, "id is required for delete");
         }
@@ -613,6 +623,8 @@ export class RoomService {
         if (!objectId) {
           throw new HttpError(400, "Invalid room id");
         }
+        const doomed = await roomsCollection.findOne({ _id: objectId } as Record<string, unknown>);
+        if (doomed) assertOutlet(user, doomed.outlet_id);
         await roomsCollection.deleteOne({ _id: objectId } as Record<string, unknown>);
         return { success: true };
       }
@@ -629,10 +641,7 @@ export class RoomService {
 
     switch (action) {
       case "list": {
-        const filter: Record<string, unknown> = {};
-        if (!user.outlets.includes("all")) {
-          filter.outlet_id = { $in: user.outlets };
-        }
+        const filter: Record<string, unknown> = outletFilter(user);
         const rules = await pricingCollection.find(filter).sort({ start_date: 1 }).toArray();
         const serialised = rules
           .map((doc: Record<string, unknown>) => {
@@ -648,10 +657,12 @@ export class RoomService {
       }
 
       case "create": {
+        assertAdmin(user, "change prices");
         if (!rule || typeof rule !== "object") {
           throw new HttpError(400, "rule payload is required");
         }
         const payloadDoc = sanitisePricingPayload(rule as Record<string, unknown>);
+        assertOutlet(user, payloadDoc.outlet_id);
         const insertResult = await pricingCollection.insertOne(payloadDoc);
         return {
           id: toStringId(insertResult.insertedId) ?? String(insertResult.insertedId),
@@ -660,6 +671,7 @@ export class RoomService {
       }
 
       case "update": {
+        assertAdmin(user, "change prices");
         if (!id || !rule || typeof rule !== "object") {
           throw new HttpError(400, "id and rule are required for update");
         }
@@ -671,7 +683,9 @@ export class RoomService {
         if (!existing) {
           throw new HttpError(404, "Pricing rule not found");
         }
+        assertOutlet(user, existing.outlet_id);
         const payloadDoc = sanitisePricingPayload({ ...existing, ...rule } as Record<string, unknown>);
+        assertOutlet(user, payloadDoc.outlet_id);
         payloadDoc.created_at = existing.created_at ?? payloadDoc.created_at;
         await pricingCollection.updateOne(
           { _id: objectId } as Record<string, unknown>,
@@ -687,6 +701,7 @@ export class RoomService {
       }
 
       case "delete": {
+        assertAdmin(user, "change prices");
         if (!id) {
           throw new HttpError(400, "id is required for delete");
         }
@@ -694,6 +709,8 @@ export class RoomService {
         if (!objectId) {
           throw new HttpError(400, "Invalid rule id");
         }
+        const doomed = await pricingCollection.findOne({ _id: objectId } as Record<string, unknown>);
+        if (doomed) assertOutlet(user, doomed.outlet_id);
         await pricingCollection.deleteOne({ _id: objectId } as Record<string, unknown>);
         return { success: true };
       }
