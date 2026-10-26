@@ -1,6 +1,6 @@
 import { assertAdmin, assertOutlet, isAdmin, outletFilter } from "../../utils/access";
 import { mongoConnection } from "../../mongo";
-import { assignedRoomIds } from "../../utils/roomAssignments";
+import { assignedRoomIds, bookingViewForWindow } from "../../utils/roomAssignments";
 import { HttpError } from "../../httpError";
 import { AuthenticatedUser } from "../../session";
 import { normalizeDocument } from "../../utils/normalizers";
@@ -180,7 +180,7 @@ const reserveForExistingHolds = (
   };
 };
 
-const computePricingForRoom = (
+export const computePricingForRoom = (
   room: Record<string, unknown>,
   pricingRules: Record<string, unknown>[],
   checkIn: Date,
@@ -402,7 +402,9 @@ export class RoomService {
       return true;
     });
 
-    const { assignedIds, holdMap, genericHold } = collectExistingHolds(relevantBookings);
+    const { assignedIds, holdMap, genericHold } = collectExistingHolds(
+      relevantBookings.map((booking: any) => bookingViewForWindow(booking, checkIn, checkOut)),
+    );
 
     const evaluatedRooms = (roomsRaw ?? []).map((room: Record<string, unknown>) => {
       const id = toStringId(room?._id);

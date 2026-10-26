@@ -1,11 +1,12 @@
 import { timingSafeEqual } from "node:crypto";
-import { Document } from "mongodb";
+import { Document, ObjectId } from "mongodb";
 import { env } from "../../env";
 import { mongoConnection } from "../../mongo";
 import { HttpError } from "../../httpError";
 import { signSession } from "../../session";
 import { stringifyId } from "../../utils/objectId";
 import { resolveOutlets } from "../../utils/access";
+import { isPlain, storePassword, verifyPassword } from "../../utils/password";
 import { AuthUser, LoginRequest, LoginResponse } from "./auth.types";
 
 const parseList = (raw: unknown, fallback: string, lowercase: boolean): string[] => {
@@ -37,6 +38,20 @@ const issueToken = async (user: AuthUser): Promise<LoginResponse> => {
 };
 
 export const authService = {
+  /** Current roles and branches of a username-and-password login, or null if it was removed or deactivated. */
+  async getStaffAccess(id: string): Promise<{ roles: string[]; outlets: string[] } | null> {
+    let _id: ObjectId;
+    try {
+      _id = new ObjectId(id);
+    } catch {
+      return null;
+    }
+    const doc = await mongoConnection.getDb().collection("configs").findOne({ _id });
+    if (!doc || doc.isActive === false) return null;
+    const user = buildUser(doc);
+    return { roles: user.roles, outlets: user.outlets };
+  },
+
   async login(payload: LoginRequest): Promise<LoginResponse> {
     const { userName, password } = payload ?? ({} as LoginRequest);
     if (!userName || !password) {
@@ -49,18 +64,25 @@ export const authService = {
       .findOne({ name: userName, isActive: true }, { collation: { locale: "en", strength: 2 } });
 
     const fallback = env.ADMIN_DEFAULT_PASSWORD;
-    const usedFallback = Boolean(fallback) && safeEqual(password, fallback!);
 
     if (!userDoc) {
-      if (usedFallback) {
+      // Recovery login for an administrator who has locked themselves out of every account.
+      if (Boolean(fallback) && safeEqual(password, fallback!)) {
         return await issueToken({ id: "default-admin", name: "Admin", roles: ["admin"], outlets: ["all"] });
       }
       throw new HttpError(401, "Invalid credentials");
     }
 
-    const stored = typeof userDoc.adminPassword === "string" ? userDoc.adminPassword : fallback;
-    if (!usedFallback && !(stored && safeEqual(password, stored))) {
+    // An account with its own password is only opened by that password. The default password is for accounts
+    // that have none yet; it must never open an account that has one.
+    const stored = typeof userDoc.adminPassword === "string" && userDoc.adminPassword ? userDoc.adminPassword : null;
+    const ok = stored ? verifyPassword(password, stored) : Boolean(fallback) && safeEqual(password, fallback!);
+    if (!ok) {
       throw new HttpError(401, "Invalid credentials");
+    }
+    // Older accounts keep their password as plain text; encrypt it from the first successful login.
+    if (stored && isPlain(stored)) {
+      await mongoConnection.getDb().collection("configs").updateOne({ _id: userDoc._id }, { $set: { adminPassword: storePassword(password) } });
     }
     return await issueToken(buildUser(userDoc));
   }

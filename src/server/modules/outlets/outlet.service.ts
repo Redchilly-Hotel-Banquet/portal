@@ -66,11 +66,20 @@ const buildOutletPayload = (
     payload.created_at = now;
   }
 
-  const stringFields = ["name", "address", "contact_number", "contact_email", "google_maps_url", "wifi_name", "wifi_password", "welcome_message"];
+  const stringFields = ["name", "address", "contact_number", "contact_email", "google_maps_url", "wifi_name", "wifi_password", "welcome_message", "legal_name", "invoice_address", "invoice_phone", "invoice_email", "invoice_terms", "whatsapp_template"];
   for (const field of stringFields) {
     if (field in input) {
       payload[field] = toStringOrEmpty(input[field]);
     }
+  }
+
+  // GST number: 15 characters in the government's format. Blank clears it.
+  if ("gstin" in input) {
+    const gstin = toStringOrEmpty(input.gstin).replace(/\s+/g, "").toUpperCase();
+    if (gstin && !/^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(gstin)) {
+      throw new HttpError(400, "That GST number is not valid. It has 15 letters and digits, for example 09ABCDE1234F1Z5.");
+    }
+    payload.gstin = gstin;
   }
 
   // Wi-Fi per floor, matched against each room's Floor when the welcome message is built.
@@ -112,7 +121,7 @@ export class OutletService {
       outlets: outlets
         .map((doc) => {
           // Wi-Fi details are for checked-in guests only; they are sent by staff, never published.
-          const { wifi_name, wifi_password, wifi_floors, welcome_message, ...publicDoc } = doc;
+          const { wifi_name, wifi_password, wifi_floors, welcome_message, whatsapp_template, invoice_terms, ...publicDoc } = doc;
           return normalizeDocument(publicDoc);
         })
         .map((doc) => ({

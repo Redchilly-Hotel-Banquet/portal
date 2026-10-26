@@ -4,8 +4,9 @@ import { AuthenticatedUser } from "../../session";
 import { matchesLastName } from "../../utils/dates";
 import { normalizeDocument } from "../../utils/normalizers";
 import { stringifyId, toObjectId } from "../../utils/objectId";
-import { assignedRoomIds, isCheckinLocked } from "../../utils/roomAssignments";
+import { assignedRoomIds, bookingViewForWindow, currentRoomIds, isCheckinLocked, roomsHeldDuring, staySegments, type StaySegment } from "../../utils/roomAssignments";
 import { ensureUniqueCheckinId } from "../../utils/checkinId";
+import { stayExtension, type ExtendRequest } from "./stay-extension";
 import { assertAdmin, assertOutlet } from "../../utils/access";
 import { computeGst, type GstSummary } from "../../utils/gst";
 import { PAYMENT_MODE_VALUES, type PaymentLine } from "../../../lib/payment-modes";
@@ -39,9 +40,8 @@ type OutletRecord = Record<string, unknown> & {
   _id: FlexibleId;
 };
 
-type ManageBookingsRequest = {
-  action: "list" | "update_status" | "update_amount";
-  id?: string;
+type ManageBookingsRequest = ExtendRequest & {
+  action: "list" | "update_status" | "update_amount" | "extension_options" | "extend_stay" | "update_stay_rate" | "split_stay_lines";
   status?: string;
   totalAmount?: number;
 };
@@ -334,7 +334,8 @@ const computeAvailableRooms = async (
       otherCheckIn <= checkOutDate && otherCheckOut >= checkInDate;
     if (!overlaps) return;
 
-    assignedRoomIds(candidate).forEach((id) => overlappingRoomIds.add(id));
+    // A stay that moved rooms only holds each room for its own nights.
+    roomsHeldDuring(candidate, checkInDate, checkOutDate, true).forEach((id) => overlappingRoomIds.add(id));
   });
 
   const bookingRoomIds = new Set<string>(assignedRoomIds(booking));
@@ -407,7 +408,7 @@ const serialiseBookingDetailed = (doc: Record<string, unknown>, includeCheckinId
 };
 const serialiseEmbedded = (doc: any) => {
   if (!doc) return null;
-  const { wifi_name, wifi_password, wifi_floors, welcome_message, ...safe } = doc;
+  const { wifi_name, wifi_password, wifi_floors, welcome_message, whatsapp_template, ...safe } = doc;
   const normalised = normalizeDocument(safe);
   if (!normalised) return null;
   return { ...normalised, id: normalised.id ?? stringifyId(doc?._id) ?? "" };
@@ -637,6 +638,7 @@ export class BookingService {
             wifi_password: normaliseString((outlet as any).wifi_password),
             wifi_floors: Array.isArray((outlet as any).wifi_floors) ? (outlet as any).wifi_floors : [],
             welcome_message: normaliseString((outlet as any).welcome_message),
+            whatsapp_template: normaliseString((outlet as any).whatsapp_template),
           };
         }
 
@@ -708,6 +710,30 @@ export class BookingService {
         };
       }
 
+      case "extension_options":
+        return stayExtension.options(db, user, request);
+
+      case "extend_stay":
+      case "update_stay_rate":
+      case "split_stay_lines": {
+        const changed =
+          request.action === "extend_stay"
+            ? await stayExtension.extend(db, user, request)
+            : request.action === "update_stay_rate"
+              ? await stayExtension.updateRate(db, user, request)
+              : await stayExtension.splitIntoLines(db, user, request);
+        const room = changed?.room_id
+          ? await roomsCollection.findOne({ _id: resolveDocumentId(changed.room_id, "Invalid room id") })
+          : null;
+        return {
+          booking: {
+            ...normaliseBooking(changed, true),
+            rooms_tables: serialiseEmbedded(room),
+            outlets: null,
+          },
+        };
+      }
+
       case "update_amount": {
         if (!request.id) {
           throw new HttpError(400, "id is required");
@@ -722,6 +748,9 @@ export class BookingService {
         const target = await bookingsCollection.findOne({ _id: resolveDocumentId(request.id, "Invalid booking id") });
         if (!target) throw new HttpError(404, "Booking not found");
         assertOutlet(user, target.outlet_id);
+        if (staySegments(target).length > 0) {
+          throw new HttpError(409, "This stay has a rate on each room line. Change the rate on the room line instead.");
+        }
 
         const filter = {
           _id: resolveDocumentId(request.id, "Invalid booking id"),
@@ -896,12 +925,13 @@ export class BookingService {
         );
       }
 
-      // Guests check in exactly the number they booked for. Reception may add more later.
+      // Only the people who actually arrive are recorded: a booking for three can check in one guest. A guest
+      // cannot add more people than were booked; reception may.
       const requiredGuests = Math.max(Math.floor(Number(booking.number_of_guests)) || 0, 1);
-      if (!isPrivileged && incomingGuests.length !== requiredGuests) {
+      if (!isPrivileged && incomingGuests.length > requiredGuests) {
         throw new HttpError(
           400,
-          `This booking is for ${requiredGuests} guest${requiredGuests === 1 ? "" : "s"}. Please provide details for exactly ${requiredGuests}.`,
+          `This booking is for ${requiredGuests} guest${requiredGuests === 1 ? "" : "s"}. Please provide details for at most ${requiredGuests}.`,
         );
       }
 
@@ -1004,11 +1034,8 @@ export class BookingService {
         : [...mappedGuests, ...previousGuests.slice(requiredGuests)];
 
       if (markAsCheckedIn) {
-        if (sanitisedGuests.length < requiredGuests) {
-          throw new HttpError(
-            400,
-            `${requiredGuests} guest${requiredGuests === 1 ? " was" : "s were"} booked. Add every guest before checking in.`,
-          );
+        if (sanitisedGuests.length < 1) {
+          throw new HttpError(400, "Add at least one guest before checking in.");
         }
         sanitisedGuests.forEach((guest, index) => {
           if (!guest.document_image) {
@@ -1489,6 +1516,12 @@ export class BookingService {
     }
     if (roomTotal < 0) roomTotal = 0;
 
+    // A stay with room lines (it was extended, or a rate was set per room) is billed from those lines.
+    const segments = staySegments(booking);
+    if (segments.length > 0) {
+      roomTotal = Math.round(segments.reduce((sum, segment) => sum + toNumber(segment.amount), 0) * 100) / 100;
+    }
+
     // Once checked out, the bill is what was finalised then, whatever the live rates say now.
     const frozen = String(booking.status).toUpperCase() === "CHECKED_OUT" && booking.gst ? (booking.gst as GstSummary) : null;
     if (frozen) {
@@ -1496,10 +1529,13 @@ export class BookingService {
       foodTotal = toNumber(booking.food_total, foodTotal);
     }
 
-    const roomLines = (Array.isArray(booking.rooms_allocated) ? booking.rooms_allocated : []).map((line: any) => ({
-      amount: toNumber(line.total) || toNumber(line.effective_rate) * toNumber(line?.perNight?.length ?? booking.nights ?? 1, 1),
-      tariff: toNumber(line.effective_rate_per_night ?? line.effective_rate ?? line.base_rate),
-    }));
+    const roomLines =
+      segments.length > 0
+        ? segments.map((segment) => ({ amount: toNumber(segment.amount), tariff: toNumber(segment.rate) }))
+        : (Array.isArray(booking.rooms_allocated) ? booking.rooms_allocated : []).map((line: any) => ({
+            amount: toNumber(line.total) || toNumber(line.effective_rate) * toNumber(line?.perNight?.length ?? booking.nights ?? 1, 1),
+            tariff: toNumber(line.effective_rate_per_night ?? line.effective_rate ?? line.base_rate),
+          }));
     const gst =
       frozen ??
       computeGst({
@@ -1595,12 +1631,26 @@ export class BookingService {
       normalisedBooking.checkin_details = await hydrateCheckinDetails(normalisedBooking.checkin_details);
     }
 
+    // What prints at the top and bottom of the invoice, as set for this branch under Settings.
+    const issuer = booking.outlet_id
+      ? await outletsCollection.findOne({ location_key: booking.outlet_id } as any)
+      : null;
+    const invoice = {
+      legal_name: normaliseString((issuer as any)?.legal_name) || normaliseString((issuer as any)?.name),
+      gstin: normaliseString((issuer as any)?.gstin),
+      address: normaliseString((issuer as any)?.invoice_address) || normaliseString((issuer as any)?.address),
+      phone: normaliseString((issuer as any)?.invoice_phone) || normaliseString((issuer as any)?.contact_number),
+      email: normaliseString((issuer as any)?.invoice_email) || normaliseString((issuer as any)?.contact_email),
+      terms: normaliseString((issuer as any)?.invoice_terms),
+    };
+
     return {
       booking: {
         ...normalisedBooking,
         rooms_tables: serialiseEmbedded(room),
         outlets: serialiseEmbedded(outlet),
       },
+      invoice,
       foodTotal,
       roomTotal,
       /** Room plus food before GST. */

@@ -1,5 +1,6 @@
 "use client";
 
+import { addDays, format, subMonths } from "date-fns";
 import { X } from "lucide-react";
 import { DataToolbar } from "@/components/admin/data-toolbar";
 import { Button } from "@/components/ui/button";
@@ -16,7 +17,17 @@ export type BookingFilterState = {
   to: string;
 };
 
-export const INITIAL_FILTERS: BookingFilterState = { status: "all", outlet: "all", search: "", from: "", to: "" };
+/** Reception mostly works with guests who are in the hotel, so that is the tab it opens on. */
+export const INITIAL_FILTERS: BookingFilterState = { status: "CHECKED_IN", outlet: "all", search: "", from: "", to: "" };
+
+const iso = (date: Date) => format(date, "yyyy-MM-dd");
+
+/** Quick stay-date ranges, counted back from today. */
+const PRESETS: Array<{ label: string; range: () => { from: string; to: string } }> = [
+  { label: "Today", range: () => ({ from: iso(new Date()), to: iso(new Date()) }) },
+  { label: "Past 7 days", range: () => ({ from: iso(addDays(new Date(), -6)), to: iso(new Date()) }) },
+  { label: "Past month", range: () => ({ from: iso(addDays(subMonths(new Date(), 1), 1)), to: iso(new Date()) }) },
+];
 
 type Props = {
   filters: BookingFilterState;
@@ -88,6 +99,24 @@ export function BookingFilters({ filters, onChange, outlets, counts, actions }: 
                 aria-label="Stay until"
                 className="w-[9.5rem]"
               />
+            </div>
+            <div className="flex items-center gap-1" role="group" aria-label="Quick date ranges">
+              {PRESETS.map((preset) => {
+                const range = preset.range();
+                const active = filters.from === range.from && filters.to === range.to;
+                return (
+                  <Button
+                    key={preset.label}
+                    type="button"
+                    size="sm"
+                    variant={active ? "default" : "outline"}
+                    aria-pressed={active}
+                    onClick={() => patch(range)}
+                  >
+                    {preset.label}
+                  </Button>
+                );
+              })}
             </div>
             {dirty ? (
               <Button variant="ghost" size="sm" onClick={() => onChange({ ...INITIAL_FILTERS, status: filters.status })}>

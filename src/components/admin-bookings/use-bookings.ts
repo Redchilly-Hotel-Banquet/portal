@@ -7,6 +7,7 @@ import type {
   BillingSummary,
   BookingResponse,
   BookingsResponse,
+  ExtensionOptions,
   OutletOption,
 } from "./types";
 import type { PaymentLine } from "@/lib/payment-modes";
@@ -95,3 +96,47 @@ export function useCheckout() {
     onError: (error) => toast.error(errorMessage(error, "Unable to complete checkout")),
   });
 }
+
+export function useExtensionOptions(bookingId: string | null, newCheckOut: string | null) {
+  return useQuery({
+    queryKey: ["extension-options", bookingId, newCheckOut],
+    queryFn: () => apiPost<ExtensionOptions>("/admin/bookings/manage", { action: "extension_options", id: bookingId, newCheckOut }, true),
+    enabled: Boolean(bookingId && newCheckOut),
+    staleTime: 0,
+    retry: false,
+  });
+}
+
+function useStayChange<TVars>(request: (vars: TVars) => Record<string, unknown>, success: string, onDone?: () => void) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: TVars) => apiPost<BookingResponse>("/admin/bookings/manage", request(vars), true),
+    onSuccess: async (_data, vars) => {
+      const id = (request(vars) as { id?: string }).id;
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: BOOKINGS_KEY }),
+        queryClient.invalidateQueries({ queryKey: id ? billingKey(id) : ["admin-booking-billing"] }),
+      ]);
+      toast.success(success);
+      onDone?.();
+    },
+    onError: (error) => toast.error(errorMessage(error, "Unable to update the stay")),
+  });
+}
+
+export const useExtendStay = (onDone?: () => void) =>
+  useStayChange(
+    (vars: { id: string; newCheckOut: string; rooms: Array<{ id: string; rate?: number }> }) => ({ action: "extend_stay", ...vars }),
+    "Stay extended",
+    onDone,
+  );
+
+export const useUpdateStayRate = (onDone?: () => void) =>
+  useStayChange(
+    (vars: { id: string; segmentIndex: number; rate: number }) => ({ action: "update_stay_rate", ...vars }),
+    "Room rate updated",
+    onDone,
+  );
+
+export const useSplitStayLines = (onDone?: () => void) =>
+  useStayChange((vars: { id: string }) => ({ action: "split_stay_lines", ...vars }), "Room lines created", onDone);

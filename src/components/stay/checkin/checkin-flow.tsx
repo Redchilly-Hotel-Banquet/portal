@@ -270,7 +270,7 @@ export function CheckinFlow() {
           </h2>
           <p className="mt-2 text-muted-foreground">
             {step === 1 && state.booking
-              ? `This booking is for ${state.guests.length} ${state.guests.length === 1 ? "guest" : "guests"}. Add each guest's details, ID photo and signature.`
+              ? `This booking is for ${state.booking.number_of_guests ?? state.guests.length} ${Number(state.booking.number_of_guests ?? state.guests.length) === 1 ? "guest" : "guests"}. Add the details, ID photo and signature of each guest who is arriving. Anyone not coming can be removed.`
               : current.description}
           </p>
 
@@ -298,7 +298,10 @@ export function CheckinFlow() {
                     guests={state.guests}
                     errors={errors}
                     extraGuests={state.extraGuests}
+                    canAdd={state.guests.length < Math.max(Math.floor(Number(state.booking?.number_of_guests ?? 1)) || 1, 1)}
                     onUpdate={(key, patch) => dispatch({ type: "updateGuest", key, patch })}
+                    onRemove={(key) => dispatch({ type: "removeGuest", key })}
+                    onAdd={() => dispatch({ type: "addGuest" })}
                   />
                 )}
                 {step === 2 && <ArrivalStep state={state} dispatch={dispatch} />}

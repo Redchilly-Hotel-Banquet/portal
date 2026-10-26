@@ -13,7 +13,9 @@ import {
   LogOut,
   Menu,
   ShoppingBag,
+  Settings,
   Store,
+  UserCog,
   Utensils,
   type LucideIcon,
 } from "lucide-react";
@@ -42,6 +44,8 @@ export const ADMIN_NAV: NavItem[] = [
   { label: "Menu items", href: "/admin/menu-items", icon: Utensils, scopes: ["admin", "kitchen"] },
   { label: "Categories", href: "/admin/categories", icon: FolderKanban, scopes: ["admin"] },
   { label: "Branches", href: "/admin/branches", icon: Store, scopes: ["admin"] },
+  { label: "Settings", href: "/admin/settings", icon: Settings, scopes: ["admin"] },
+  { label: "Access", href: "/admin/access", icon: UserCog, scopes: ["admin"] },
   { label: "Analytics", href: "/admin/analytics", icon: BarChart3, scopes: ["admin"] },
 ];
 

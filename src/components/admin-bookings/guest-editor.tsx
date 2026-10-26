@@ -193,8 +193,8 @@ export function GuestEditor({ guests, booked, onChange, onAdd, onRemove }: Props
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">
-          Guests: {completeBooked} of {booked} booked complete
-          {extra > 0 ? ` (+${extra} additional)` : ""}
+          {guests.length} guest{guests.length === 1 ? "" : "s"} arriving, {guests.filter(isGuestComplete).length} complete
+          {guests.length !== booked ? ` (${booked} booked)` : ""}
         </p>
         <Button type="button" variant="outline" size="sm" disabled={guests.length >= MAX_ADMIN_GUESTS} onClick={onAdd}>
           <Plus className="mr-2 h-4 w-4" strokeWidth={1.75} aria-hidden />
@@ -208,7 +208,7 @@ export function GuestEditor({ guests, booked, onChange, onAdd, onRemove }: Props
             key={guest.key}
             guest={guest}
             index={index}
-            removable={index >= booked}
+            removable={guests.length > 1}
             onChange={(patch) => onChange(guest.key, patch)}
             onRemove={() => onRemove(guest.key)}
             onPreview={setPreview}

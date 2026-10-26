@@ -68,7 +68,9 @@ const toDateTimeLocal = (value?: string | null) => {
 
 function prefill(booking: CheckinBooking, details: CheckinDetails | null): Partial<CheckinFormState> {
   const saved = details?.guests ?? [];
-  const count = Math.max(Math.floor(Number(booking.number_of_guests ?? 1)) || 1, 1);
+  const booked = Math.max(Math.floor(Number(booking.number_of_guests ?? 1)) || 1, 1);
+  // Once guests have been saved, only they are shown: a booking for three can be checked in for one.
+  const count = saved.length > 0 ? Math.min(saved.length, booked) : booked;
   const guests: GuestEntry[] = Array.from({ length: count }, (_, index) => {
     const g = saved[index];
     if (!g) return index === 0 ? { ...blankGuest(), phone: tenDigitPhone(booking.guest_phone) ?? "" } : blankGuest();
@@ -99,7 +101,7 @@ function prefill(booking: CheckinBooking, details: CheckinDetails | null): Parti
     needsAssistance: Boolean(details?.needs_special_assistance),
     assistanceDetails: details?.special_assistance_details ?? "",
     otherRequests: details?.other_requests ?? "",
-    extraGuests: Math.max(saved.length - count, 0),
+    extraGuests: Math.max(saved.length - booked, 0),
   };
 }
 
@@ -109,6 +111,8 @@ export type CheckinAction =
   | { type: "lookupDone"; booking: CheckinBooking; details: CheckinDetails | null; lookup: { bookingCode: string; lastName: string } }
   | { type: "saved"; booking: CheckinBooking; details: CheckinDetails | null }
   | { type: "updateGuest"; key: string; patch: Partial<GuestEntry> }
+  | { type: "removeGuest"; key: string }
+  | { type: "addGuest" }
   | { type: "reset" };
 
 function reducer(state: CheckinFormState, action: CheckinAction): CheckinFormState {
@@ -123,6 +127,13 @@ function reducer(state: CheckinFormState, action: CheckinAction): CheckinFormSta
       return { ...state, ...prefill(action.booking, action.details) };
     case "updateGuest":
       return { ...state, guests: state.guests.map((g) => (g.key === action.key ? { ...g, ...action.patch } : g)) };
+    case "removeGuest":
+      // At least one guest always stays.
+      return state.guests.length > 1 ? { ...state, guests: state.guests.filter((g) => g.key !== action.key) } : state;
+    case "addGuest": {
+      const booked = Math.max(Math.floor(Number(state.booking?.number_of_guests ?? 1)) || 1, 1);
+      return state.guests.length < booked ? { ...state, guests: [...state.guests, blankGuest()] } : state;
+    }
     case "reset":
       return initialCheckinState;
     default:

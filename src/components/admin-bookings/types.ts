@@ -22,6 +22,27 @@ export type AllocatedRoom = {
   assigned_at?: string | null;
 };
 
+/** One room for a range of nights. Present once a stay has been extended or given a rate per room. */
+export type StaySegment = {
+  room_id: string;
+  code?: string;
+  type?: string;
+  from: string;
+  to: string;
+  nights: number;
+  rate: number;
+  amount: number;
+  kind?: "STAY" | "EXTENSION";
+};
+
+export type ExtensionOptions = {
+  currentCheckOut: string;
+  newCheckOut: string;
+  nights: number;
+  canSetRate: boolean;
+  rooms: Array<{ id: string; code: string; category: string; level: string | null; occupancy: number; rate: number; currentRoom: boolean }>;
+};
+
 export type Booking = {
   id: string;
   booking_code?: string;
@@ -34,6 +55,7 @@ export type Booking = {
   guest_phone?: string | null;
   /** 6-digit ID guests use to order food to their room. Staff only. */
   checkin_id?: string;
+  stay_segments?: StaySegment[];
   /** How the guest paid at check-out. */
   payments?: Array<{ mode: string; amount: number; reference?: string | null }>;
   paid_at?: string;
@@ -66,6 +88,8 @@ export type WelcomeInfo = {
   /** Wi-Fi by floor; a room's Floor picks the entry. The two fields above are the fallback. */
   wifi_floors?: WifiFloor[];
   welcome_message: string;
+  /** The branch's WhatsApp wording; empty means the standard message. */
+  whatsapp_template?: string;
 };
 
 export type BookingsResponse = { bookings: Booking[]; welcome?: Record<string, WelcomeInfo>; /** Floor of each room, by room id. */ room_levels?: Record<string, string> };
@@ -109,6 +133,8 @@ export type BillingSummary = {
   booking: Booking;
   foodTotal: number;
   roomTotal: number;
+  /** Who the invoice is from, as set under Settings for the branch. */
+  invoice?: { legal_name: string; gstin: string; address: string; phone: string; email: string; terms: string };
   /** Room plus food before GST. */
   subtotal: number;
   gst: GstSummary;

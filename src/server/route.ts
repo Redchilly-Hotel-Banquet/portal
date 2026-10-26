@@ -4,6 +4,7 @@ import { mongoConnection } from "./mongo";
 import { userService } from "./modules/users/user.service";
 import { AuthenticatedUser, assertRoles, readSession } from "./session";
 import { resolveOutlets } from "./utils/access";
+import { authService } from "./modules/auth/auth.service";
 
 type Context = { body: any; user: AuthenticatedUser | null; request: Request };
 
@@ -51,6 +52,13 @@ export const route =
         if (access) user = { ...user, ...access };
         else if (needsSession) throw new HttpError(401, "Account is no longer active");
         else user = null;
+      }
+      // Username-and-password staff: their roles and branches are re-read, so a change or a deactivation made by an
+      // administrator applies at once instead of when the token expires.
+      if (needsSession && user && user.src !== "user" && user.id !== "default-admin") {
+        const access = await authService.getStaffAccess(user.id);
+        if (!access) throw new HttpError(401, "Account is no longer active");
+        user = { ...user, ...access };
       }
       // Staff may only touch the branches they were given, matched to the real branch keys.
       if (needsSession && user) user = { ...user, outlets: await resolveOutlets(user.outlets) };

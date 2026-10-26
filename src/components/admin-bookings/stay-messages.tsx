@@ -3,6 +3,7 @@
 import { MessageCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { tenDigitPhone, whatsappLink } from "@/lib/phone";
+import { DEFAULT_WHATSAPP_TEMPLATE, renderTemplate } from "@/lib/whatsapp-template";
 import type { Booking, WelcomeInfo } from "./types";
 
 type Recipient = { name: string; phone: string };
@@ -67,26 +68,21 @@ export const welcomeMessage = (
   guestName: string,
   roomLevels?: Record<string, string>,
 ): string => {
-  const rooms = roomCodes(booking);
-  const lines = [`Welcome to ${welcome?.name || "Red Chilly"}, ${guestName}!`, ""];
-  if (rooms.length) lines.push(`Room: ${rooms.join(", ")}`);
-  if (booking.checkin_id) {
-    lines.push(
-      `Check-in ID: ${booking.checkin_id}`,
-      "To order food to your room, scan the QR code in your room, choose Room and enter this ID. Please do not share it.",
-    );
-  }
   const wifi = wifiFor(booking, welcome, roomLevels);
-  if (wifi.length) {
-    lines.push("");
-    for (const entry of wifi) {
+  const wifiText = wifi
+    .flatMap((entry) => {
       const label = wifi.length > 1 && entry.floor ? ` (${entry.floor})` : "";
-      if (entry.name) lines.push(`Wi-Fi${label}: ${entry.name}`);
-      if (entry.password) lines.push(`Wi-Fi password${label}: ${entry.password}`);
-    }
-  }
-  if (welcome?.welcome_message) lines.push("", welcome.welcome_message);
-  return lines.join("\n");
+      return [entry.name ? `Wi-Fi${label}: ${entry.name}` : "", entry.password ? `Wi-Fi password${label}: ${entry.password}` : ""].filter(Boolean);
+    })
+    .join("\n");
+  return renderTemplate(welcome?.whatsapp_template?.trim() || DEFAULT_WHATSAPP_TEMPLATE, {
+    guest: guestName,
+    hotel: welcome?.name || "Red Chilly",
+    room: roomCodes(booking).join(", "),
+    checkin_id: booking.checkin_id ?? "",
+    wifi: wifiText,
+    note: welcome?.welcome_message ?? "",
+  });
 };
 
 export function StayMessages({

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { DoorOpen, LogOut, Phone, Receipt } from "lucide-react";
+import { CalendarPlus, DoorOpen, LogOut, Phone, Receipt } from "lucide-react";
 import { formatDate, formatINR } from "@/components/admin/format";
 import { StatusBadge } from "@/components/admin/status-badge";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,8 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { BookingCharges } from "./booking-charges";
 import { BookingTimeline } from "./booking-timeline";
 import { StayMessages } from "./stay-messages";
+import { ExtendStayDialog } from "./extend-stay-dialog";
+import { RoomLines } from "./room-lines";
 import { CheckoutDialog } from "./checkout-dialog";
 import type { PaymentLine } from "@/lib/payment-modes";
 import { PhoneOrderDialog } from "@/components/admin-orders/phone-order-dialog";
@@ -48,6 +50,7 @@ function Detail({ label, children }: { label: string; children: React.ReactNode 
 export function BookingDetailSheet({ booking, welcome, roomLevels, onClose, onManageCheckin, onOpenInvoice }: Props) {
   const [confirmCheckout, setConfirmCheckout] = useState(false);
   const [phoneOrderOpen, setPhoneOrderOpen] = useState(false);
+  const [extendOpen, setExtendOpen] = useState(false);
   const [openingInvoice, setOpeningInvoice] = useState(false);
   const billingQuery = useBillingQuery(booking?.id ?? null);
   const statusMutation = useUpdateStatus();
@@ -112,6 +115,12 @@ export function BookingDetailSheet({ booking, welcome, roomLevels, onClose, onMa
                   Invoice
                 </Button>
                 {booking.status === "CHECKED_IN" ? (
+                  <Button variant="outline" onClick={() => setExtendOpen(true)}>
+                    <CalendarPlus className="mr-2 h-4 w-4" strokeWidth={1.75} aria-hidden />
+                    Extend stay
+                  </Button>
+                ) : null}
+                {booking.status === "CHECKED_IN" ? (
                   <Button variant="outline" onClick={() => setPhoneOrderOpen(true)}>
                     <Phone className="mr-2 h-4 w-4" strokeWidth={1.75} aria-hidden />
                     Add food order
@@ -175,6 +184,12 @@ export function BookingDetailSheet({ booking, welcome, roomLevels, onClose, onMa
                 )}
               </Section>
 
+              {(booking.stay_segments?.length ?? 0) > 0 || booking.status === "CHECKED_IN" ? (
+                <Section title="Room charges by night">
+                  <RoomLines booking={booking} />
+                </Section>
+              ) : null}
+
               <Section title="Timeline">
                 <BookingTimeline booking={booking} />
               </Section>
@@ -191,6 +206,8 @@ export function BookingDetailSheet({ booking, welcome, roomLevels, onClose, onMa
           ) : null}
         </SheetContent>
       </Sheet>
+
+      <ExtendStayDialog booking={booking} open={extendOpen} onOpenChange={setExtendOpen} />
 
       {booking ? (
         <PhoneOrderDialog

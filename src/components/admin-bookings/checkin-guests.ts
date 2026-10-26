@@ -72,8 +72,12 @@ export function seedGuests(context: CheckinContext): AdminGuest[] {
     savedImage: guest.document_image?.data_url ?? "",
     savedSignature: guest.signature_image?.data_url ?? "",
   }));
-  while (guests.length < bookedGuestCount(context)) {
-    guests.push(guests.length === 0 ? { ...blankGuest(), phone: tenDigitPhone(context.booking?.guest_phone) ?? "" } : blankGuest());
+  // With nothing saved yet, start with a card per booked guest; reception removes the ones who do not arrive.
+  // Once guests are saved, only they are shown.
+  if (stored.length === 0) {
+    while (guests.length < bookedGuestCount(context)) {
+      guests.push(guests.length === 0 ? { ...blankGuest(), phone: tenDigitPhone(context.booking?.guest_phone) ?? "" } : blankGuest());
+    }
   }
   return guests;
 }
@@ -95,7 +99,7 @@ export function guestStatus(guest: AdminGuest): Completeness {
 /** Short reasons the check-in cannot be marked complete yet; empty when ready. */
 export function completionIssues(guests: AdminGuest[], booked: number, roomCount: number): string[] {
   const issues: string[] = [];
-  if (guests.length < booked) issues.push(`Add ${booked - guests.length} more guest${booked - guests.length === 1 ? "" : "s"}`);
+  if (guests.length < 1) issues.push("Add at least one guest");
   const incomplete = guests.filter((guest) => !isGuestComplete(guest)).length;
   if (incomplete > 0) issues.push(`${incomplete} guest${incomplete === 1 ? "" : "s"} need name, ID number, photo and signature`);
   if (roomCount === 0) issues.push("Assign at least one room");

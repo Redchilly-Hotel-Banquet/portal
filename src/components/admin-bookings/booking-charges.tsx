@@ -56,7 +56,7 @@ export function BookingCharges({ booking, billing, loading, error }: Props) {
           {draft === null ? (
             <span className="flex items-center gap-2">
               <Money value={bookingTotal(booking)} className="font-medium" />
-              {canEditPrice ? (
+              {canEditPrice && !(booking.stay_segments?.length) ? (
               <Button
                   variant="ghost"
                   size="icon"

@@ -2,7 +2,7 @@ import { randomInt, timingSafeEqual } from "node:crypto";
 import type { Collection, Db } from "mongodb";
 import { HttpError } from "../httpError";
 import type { AuthenticatedUser } from "../session";
-import { assignedRoomIds } from "./roomAssignments";
+import { currentRoomIds } from "./roomAssignments";
 import { stringifyId } from "./objectId";
 
 /**
@@ -81,7 +81,7 @@ export const findCheckedInBookingForRoom = async (db: Db, roomId: string, outlet
       $or: [{ room_id: roomId }, { room_ids: roomId }, { "rooms_allocated.room_id": roomId }, { "checkin_details.assigned_rooms.id": roomId }],
     })
     .toArray();
-  return candidates.find((booking) => assignedRoomIds(booking).includes(roomId)) ?? null;
+  return candidates.find((booking) => currentRoomIds(booking).includes(roomId)) ?? null;
 };
 
 export const bookingIdOf = (booking: Record<string, any>) => stringifyId(booking._id) ?? "";

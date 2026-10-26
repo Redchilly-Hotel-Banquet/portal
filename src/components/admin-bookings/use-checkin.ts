@@ -90,9 +90,10 @@ export function useCheckinManager(booking: Booking | null) {
 
   const removeGuest = useCallback(
     (key: string) => {
-      setGuests((prev) => prev.filter((guest, index) => guest.key !== key || index < booked));
+      // At least one guest always stays.
+      setGuests((prev) => (prev.length > 1 ? prev.filter((guest) => guest.key !== key) : prev));
     },
-    [booked],
+    [],
   );
 
   const save = useCallback(async () => {

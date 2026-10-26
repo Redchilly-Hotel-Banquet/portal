@@ -1,8 +1,9 @@
+import { formatDate } from "@/components/admin/format";
 import { assignedRooms } from "./invoice-details";
 import type { Booking, GstLine } from "./types";
 import { roomNightlyRate } from "./utils";
 
-export type RoomChargeLine = { key: string; label: string; nights: number; rate: number; amount: number };
+export type RoomChargeLine = { key: string; label: string; nights: number; rate: number; amount: number; /** Dates this room was occupied, when the stay moved or was extended. */ period?: string };
 
 const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
@@ -11,6 +12,18 @@ const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 10
  * keep their own rates (scaled if the room total was negotiated); otherwise the total is shared equally.
  */
 export function roomChargeLines(booking: Booking, roomTotal: number, nights: number): RoomChargeLine[] {
+  // A stay with room lines is billed exactly as recorded: each room, its nights and its own rate.
+  if ((booking.stay_segments?.length ?? 0) > 0) {
+    return booking.stay_segments!.map((segment, index) => ({
+      key: `${segment.room_id}-${index}`,
+      label: `Room ${segment.code || segment.room_id}${segment.type ? ` (${segment.type})` : ""}`,
+      nights: segment.nights,
+      rate: segment.rate,
+      amount: segment.amount,
+      period: `${formatDate(segment.from)} to ${formatDate(segment.to)}`,
+    }));
+  }
+
   const stayNights = Math.max(nights, 1);
   const rooms = assignedRooms(booking);
   const priced = booking.rooms_allocated ?? [];

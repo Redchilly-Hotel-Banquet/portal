@@ -22,6 +22,8 @@ const DESCRIPTIONS: Record<string, string> = {
   "/admin/categories": "Organise the menu into categories.",
   "/admin/branches": "Manage branch details and locations.",
   "/admin/analytics": "Revenue, orders and bookings by branch.",
+  "/admin/settings": "Invoice details, GST number, Wi-Fi and the WhatsApp welcome message for each branch.",
+  "/admin/access": "Choose who can sign in, their roles and the branches they work in.",
 };
 
 type KitchenFigures = { ordersToday: number; ordersTotal: number; openOrders: number; sales: number; dishesAvailable: number; dishesTotal: number };

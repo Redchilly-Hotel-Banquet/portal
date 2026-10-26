@@ -5,7 +5,7 @@ import { HttpError } from "../../httpError";
 import { mongoConnection } from "../../mongo";
 import { signSession, type AuthenticatedUser } from "../../session";
 import { stringifyId, toObjectId } from "../../utils/objectId";
-import { assignedRoomIds, isCheckinLocked } from "../../utils/roomAssignments";
+import { currentRoomIds, isCheckinLocked } from "../../utils/roomAssignments";
 import { parseImageDataUrl, r2 } from "../../storage/r2";
 
 /**
@@ -458,7 +458,7 @@ export const userService = {
     const rooms: StayRoom[] = [];
     const seen = new Set<string>();
     for (const booking of bookings) {
-      const ids = new Set<string>(assignedRoomIds(booking));
+      const ids = new Set<string>(currentRoomIds(booking));
 
       const objectIds = Array.from(ids).map((id) => toObjectId(id)).filter((id): id is ObjectId => Boolean(id));
       if (objectIds.length === 0) continue;

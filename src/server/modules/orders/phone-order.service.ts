@@ -4,7 +4,7 @@ import { canAccessOutlet } from "../../utils/access";
 import { mongoConnection } from "../../mongo";
 import type { AuthenticatedUser } from "../../session";
 import { stringifyId, toObjectId } from "../../utils/objectId";
-import { assignedRoomIds } from "../../utils/roomAssignments";
+import { currentRoomIds } from "../../utils/roomAssignments";
 
 type PhoneOrderRequest = {
   action?: "stays" | "create";
@@ -42,7 +42,7 @@ export const phoneOrderService = {
       .project({ guest_name: 1, booking_code: 1, outlet_id: 1, room_id: 1, room_ids: 1, rooms_allocated: 1, checkin_details: 1 })
       .toArray();
 
-    const roomIds = Array.from(new Set(bookings.flatMap((booking) => assignedRoomIds(booking))));
+    const roomIds = Array.from(new Set(bookings.flatMap((booking) => currentRoomIds(booking))));
     const rooms = roomIds.length
       ? await db
           .collection("rooms_tables")
@@ -58,7 +58,7 @@ export const phoneOrderService = {
           bookingCode: booking.booking_code ?? "",
           guestName: booking.guest_name ?? "",
           outletId: booking.outlet_id ?? "",
-          rooms: assignedRoomIds(booking).map((id) => ({ id, code: codeById.get(id) ?? "" })),
+          rooms: currentRoomIds(booking).map((id) => ({ id, code: codeById.get(id) ?? "" })),
         }))
         .filter((stay) => stay.bookingId && stay.rooms.length > 0),
     };
@@ -74,7 +74,7 @@ export const phoneOrderService = {
       throw new HttpError(409, "Orders can only be added for guests who are checked in.");
     }
 
-    const held = assignedRoomIds(booking);
+    const held = currentRoomIds(booking);
     const roomId = request.roomId ? String(request.roomId) : held[0];
     if (!roomId || !held.includes(roomId)) throw new HttpError(400, "Choose one of the rooms this booking holds.");
 

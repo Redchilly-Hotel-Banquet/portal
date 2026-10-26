@@ -17,7 +17,11 @@ interface GuestsStepProps {
   guests: GuestEntry[];
   errors: CheckinErrors;
   extraGuests: number;
+  /** Guests the booking allows beyond those listed, so someone removed by mistake can be added back. */
+  canAdd: boolean;
   onUpdate: (key: string, patch: Partial<GuestEntry>) => void;
+  onRemove: (key: string) => void;
+  onAdd: () => void;
 }
 
 const SignaturePad = dynamic(() => import("./signature-pad"), {
@@ -33,12 +37,14 @@ function GuestCard({
   total,
   errors,
   onUpdate,
+  onRemove,
 }: {
   guest: GuestEntry;
   index: number;
   total: number;
   errors: CheckinErrors;
   onUpdate: (patch: Partial<GuestEntry>) => void;
+  onRemove?: () => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [processing, setProcessing] = useState(false);
@@ -73,6 +79,13 @@ function GuestCard({
       <legend className="px-2 text-sm font-medium">
         Guest {index + 1} of {total}
       </legend>
+      {onRemove ? (
+        <div className="mb-3 flex justify-end">
+          <Button type="button" variant="ghost" size="sm" onClick={onRemove}>
+            This guest is not coming
+          </Button>
+        </div>
+      ) : null}
       <div className="grid gap-5 sm:grid-cols-3">
         <Field id={`${id}-name`} label="Full name" required error={nameErr} className="sm:col-span-3">
           <Input
@@ -199,7 +212,7 @@ function GuestCard({
   );
 }
 
-export function GuestsStep({ guests, errors, extraGuests, onUpdate }: GuestsStepProps) {
+export function GuestsStep({ guests, errors, extraGuests, canAdd, onUpdate, onRemove, onAdd }: GuestsStepProps) {
   return (
     <div className="space-y-5">
       {guests.map((guest, index) => (
@@ -210,8 +223,14 @@ export function GuestsStep({ guests, errors, extraGuests, onUpdate }: GuestsStep
           total={guests.length}
           errors={errors}
           onUpdate={(patch) => onUpdate(guest.key, patch)}
+          onRemove={guests.length > 1 ? () => onRemove(guest.key) : undefined}
         />
       ))}
+      {canAdd && (
+        <Button type="button" variant="outline" onClick={onAdd}>
+          Add another guest
+        </Button>
+      )}
       {extraGuests > 0 && (
         <p className="border border-border bg-card p-4 text-sm text-muted-foreground">
           {extraGuests} additional guest{extraGuests === 1 ? " was" : "s were"} added by reception and will be kept.
