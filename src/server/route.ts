@@ -73,6 +73,20 @@ export const route =
           { status: error.statusCode },
         );
       }
+      // A unique index refused a duplicate: say what clashed instead of "Internal server error".
+      if ((error as { code?: number })?.code === 11000) {
+        const fields = Object.keys((error as { keyPattern?: Record<string, unknown> }).keyPattern ?? {});
+        const message = fields.includes("code")
+          ? "A room or table with that code already exists in this branch."
+          : fields.includes("location_key")
+            ? "A branch with that key already exists."
+            : fields.includes("name")
+              ? "A login with that username already exists."
+              : fields.includes("booking_code") || fields.includes("checkin_id")
+                ? "Please try again."
+                : "That already exists.";
+        return NextResponse.json({ error: message }, { status: 409 });
+      }
       console.error("[api] unhandled error", error);
       return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { apiPost } from "@/lib/apiClient";
+import { optionalPhoneError } from "@/lib/phone";
 import type { Booking, CheckinContext } from "./types";
 import {
   blankGuest,
@@ -30,10 +31,14 @@ export function useCheckinManager(booking: Booking | null) {
   const [selectedRooms, setSelectedRooms] = useState<string[]>([]);
   const [markComplete, setMarkComplete] = useState(false);
   const [guests, setGuests] = useState<AdminGuest[]>([]);
+  const [contactPhone, setContactPhone] = useState("");
+  const [contactEmail, setContactEmail] = useState("");
 
   const hydrate = useCallback((payload: CheckinContext, fallbackStatus?: string) => {
     setContext(payload);
     setGuests(seedGuests(payload));
+    setContactPhone(payload.booking?.guest_phone ?? "");
+    setContactEmail(payload.booking?.guest_email ?? "");
     setSelectedRooms(assignedRoomIds(payload));
     setMarkComplete(isCheckinComplete(payload, fallbackStatus));
   }, []);
@@ -78,7 +83,10 @@ export function useCheckinManager(booking: Booking | null) {
   }, []);
 
   const booked = context ? bookedGuestCount(context) : booking?.number_of_guests || 1;
-  const issues = useMemo(() => completionIssues(guests, booked, selectedRooms.length), [guests, booked, selectedRooms]);
+  // Someone has to be reachable: the booking contact below, or any guest's own number.
+  const hasContact = Boolean(contactPhone.trim() || contactEmail.trim() || guests.some((guest) => guest.phone.trim()));
+  const contactError = optionalPhoneError(contactPhone) || (contactEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail.trim()) ? "Enter a valid email address, or leave it blank." : null);
+  const issues = useMemo(() => completionIssues(guests, booked, selectedRooms.length, hasContact), [guests, booked, selectedRooms, hasContact]);
 
   const updateGuest = useCallback((key: string, patch: Partial<AdminGuest>) => {
     setGuests((prev) => prev.map((guest) => (guest.key === key ? { ...guest, ...patch } : guest)));
@@ -101,6 +109,10 @@ export function useCheckinManager(booking: Booking | null) {
     const details = context.checkinDetails;
     if (!guests.every(hasDetails)) {
       toast.error("Each guest needs a name, document number and ID photo, and any mobile number must be valid, before saving.");
+      return;
+    }
+    if (contactError) {
+      toast.error(contactError);
       return;
     }
     if (markComplete && issues.length > 0) {
@@ -126,6 +138,7 @@ export function useCheckinManager(booking: Booking | null) {
           specialAssistanceDetails: details?.special_assistance_details ?? "",
           otherRequests: details?.other_requests ?? "",
           assignedRoomIds: selectedRooms,
+          contact: { phone: contactPhone.trim(), email: contactEmail.trim() },
         },
         markAsCheckedIn: markComplete,
       };
@@ -140,7 +153,7 @@ export function useCheckinManager(booking: Booking | null) {
     } finally {
       setSaving(false);
     }
-  }, [booking, context, guests, hydrate, issues, markComplete, queryClient, selectedRooms]);
+  }, [booking, context, contactError, contactEmail, contactPhone, guests, hydrate, issues, markComplete, queryClient, selectedRooms]);
 
   return {
     context,
@@ -154,6 +167,12 @@ export function useCheckinManager(booking: Booking | null) {
     guests,
     booked,
     issues,
+    contactPhone,
+    contactEmail,
+    contactError,
+    hasContact,
+    setContactPhone,
+    setContactEmail,
     updateGuest,
     addGuest,
     removeGuest,

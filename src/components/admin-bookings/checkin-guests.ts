@@ -97,12 +97,13 @@ export function guestStatus(guest: AdminGuest): Completeness {
 }
 
 /** Short reasons the check-in cannot be marked complete yet; empty when ready. */
-export function completionIssues(guests: AdminGuest[], booked: number, roomCount: number): string[] {
+export function completionIssues(guests: AdminGuest[], booked: number, roomCount: number, hasContact = true): string[] {
   const issues: string[] = [];
   if (guests.length < 1) issues.push("Add at least one guest");
   const incomplete = guests.filter((guest) => !isGuestComplete(guest)).length;
   if (incomplete > 0) issues.push(`${incomplete} guest${incomplete === 1 ? "" : "s"} need name, ID number, photo and signature`);
   if (roomCount === 0) issues.push("Assign at least one room");
+  if (!hasContact) issues.push("Add a phone number or an email");
   return issues;
 }
 

@@ -6,6 +6,9 @@ import { StatusBadge } from "@/components/admin/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { optionalPhoneError } from "@/lib/phone";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { GuestEditor } from "./guest-editor";
@@ -44,7 +47,7 @@ function Body({ booking }: { booking: Booking }) {
       <div className="flex flex-wrap items-start justify-between gap-4 text-sm">
         <div>
           <p className="font-medium">{live.guest_name}</p>
-          <p className="text-muted-foreground">{live.guest_phone || live.guest_email || "No contact on file"}</p>
+          <p className="text-muted-foreground">{live.guest_email || "No email"}</p>
           {live.preferred_categories ? (
             <div className="mt-2 flex flex-wrap gap-2">
               {Object.entries(live.preferred_categories).map(([category, count]) => (
@@ -65,6 +68,22 @@ function Body({ booking }: { booking: Booking }) {
           </div>
         </div>
       </div>
+
+      <Block title="Contact">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="contact-phone">Phone number</Label>
+            <Input id="contact-phone" type="tel" inputMode="tel" value={manager.contactPhone} onChange={(e) => manager.setContactPhone(e.target.value)} placeholder="10-digit mobile number" autoComplete="off" aria-invalid={Boolean(optionalPhoneError(manager.contactPhone))} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="contact-email">Email</Label>
+            <Input id="contact-email" type="email" value={manager.contactEmail} onChange={(e) => manager.setContactEmail(e.target.value)} placeholder="name@example.com" autoComplete="off" />
+          </div>
+        </div>
+        <p className={`text-xs ${manager.hasContact && !manager.contactError ? "text-muted-foreground" : "text-destructive"}`} role={manager.hasContact ? undefined : "alert"}>
+          {manager.contactError ?? (manager.hasContact ? "At least one of phone or email is needed to check in." : "Add a phone number or an email. One of them is needed to check in.")}
+        </p>
+      </Block>
 
       <Block title="Guests">
         <GuestEditor

@@ -29,7 +29,14 @@ export function DetailsForm() {
     mutationFn: () => apiPost<{ profile: Profile }>("/me", { name, phone }, "user"),
     onSuccess: (res) => {
       queryClient.setQueryData(profileKeys.profile, res.profile);
-      toast.success("Profile updated");
+      const linked = res.profile.linkedBookings ?? 0;
+      if (linked > 0) {
+        // Bookings made with this number now belong in the list.
+        void queryClient.invalidateQueries({ queryKey: profileKeys.bookings });
+        toast.success(`Profile updated. ${linked} earlier booking${linked === 1 ? " was" : "s were"} found with this phone number and added to My bookings.`);
+      } else {
+        toast.success("Profile updated");
+      }
     },
     onError: (error) => toast.error(error instanceof ApiError ? error.message : "Could not update your profile"),
   });

@@ -6,7 +6,7 @@ import { normalizeDocument } from "../../utils/normalizers";
 import { stringifyId, toObjectId } from "../../utils/objectId";
 import { assignedRoomIds, bookingViewForWindow, currentRoomIds, isCheckinLocked, roomsHeldDuring, staySegments, type StaySegment } from "../../utils/roomAssignments";
 import { ensureUniqueCheckinId } from "../../utils/checkinId";
-import { stayExtension, type ExtendRequest } from "./stay-extension";
+import { reconcileSegments, stayExtension, type ExtendRequest } from "./stay-extension";
 import { assertAdmin, assertOutlet } from "../../utils/access";
 import { computeGst, type GstSummary } from "../../utils/gst";
 import { PAYMENT_MODE_VALUES, type PaymentLine } from "../../../lib/payment-modes";
@@ -1223,6 +1223,21 @@ export class BookingService {
         : [];
       let nextRoomsAllocated: any[] | null = null;
 
+      // Someone must be reachable: a phone number or an email, from the booking, the contact entered now, or any
+      // guest's own number. Reception completing a check-in and guests submitting online both need it.
+      const contactInput = (checkinData.contact ?? {}) as Record<string, unknown>;
+      const contactPhone = contactInput.phone !== undefined ? normaliseGuestPhone(contactInput.phone, "Contact") : null;
+      const contactEmailRaw = contactInput.email !== undefined ? normaliseString(contactInput.email).toLowerCase() : "";
+      if (contactEmailRaw && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmailRaw)) {
+        throw new HttpError(400, "Contact: enter a valid email address, or leave it blank.");
+      }
+      const reachablePhone = contactInput.phone !== undefined ? contactPhone : normaliseString(booking.guest_phone) || null;
+      const reachableEmail = contactInput.email !== undefined ? contactEmailRaw : normaliseString(booking.guest_email);
+      const guestHasPhone = sanitisedGuests.some((guest: any) => Boolean(guest.phone));
+      if ((markAsCheckedIn || !isPrivileged) && !reachablePhone && !reachableEmail && !guestHasPhone) {
+        throw new HttpError(400, "Add a phone number or an email for the guest before checking in.");
+      }
+
       const updateDoc: Record<string, unknown> = {
         checkin_details: nextCheckinDetails,
         updated_at: new Date(nowIso),
@@ -1287,6 +1302,22 @@ export class BookingService {
 
       if (nextRoomsAllocated) {
         updateDoc.rooms_allocated = nextRoomsAllocated;
+      }
+
+      // An extended stay is billed by room line: changing its rooms here must change those lines too, or a room
+      // that was left would stay charged and held, and one that was added would never be billed.
+      if (isPrivileged) {
+        if (contactInput.phone !== undefined) updateDoc.guest_phone = contactPhone;
+        if (contactInput.email !== undefined) updateDoc.guest_email = contactEmailRaw || null;
+      }
+
+      if (isPrivileged && assignedRoomIdsInput !== null && staySegments(booking).length > 0) {
+        const reconciled = await reconcileSegments(db, booking, assignedRooms.map((room) => room.id));
+        if (reconciled) {
+          updateDoc.stay_segments = reconciled.segments;
+          updateDoc.total_amount = reconciled.total;
+          updateDoc.room_total = reconciled.total;
+        }
       }
 
       await bookingsCollection.updateOne(bookingFilter, { $set: updateDoc });

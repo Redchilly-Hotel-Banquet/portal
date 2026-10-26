@@ -2,7 +2,7 @@ import type { Db } from "mongodb";
 import { HttpError } from "../../httpError";
 import type { AuthenticatedUser } from "../../session";
 import { assertAdmin, assertOutlet, isAdmin } from "../../utils/access";
-import { assignedRoomIds, currentRoomIds, roomsHeldDuring, staySegments, type StaySegment } from "../../utils/roomAssignments";
+import { assignedRoomIds, currentRoomIds, roomsHeldDuring, staySegments, todayInIndia, type StaySegment } from "../../utils/roomAssignments";
 import { toObjectId } from "../../utils/objectId";
 import { computePricingForRoom } from "../rooms/room.service";
 
@@ -136,6 +136,59 @@ const window = (booking: Record<string, any>, newCheckOut: unknown) => {
   if (added < 1) throw new HttpError(400, "The new check-out must be after the current check-out.");
   if (added > MAX_EXTENSION_NIGHTS) throw new HttpError(400, `A stay can be extended by at most ${MAX_EXTENSION_NIGHTS} nights at a time.`);
   return { from, to, added };
+};
+
+/**
+ * Keeps the room lines in step when reception changes which rooms a guest is in from the check-in screen.
+ * A room taken off stops being charged from today (nights already stayed stay billed); a room added is charged
+ * from today to check-out at the price-list rate. Returns null when the stay has no room lines.
+ */
+export const reconcileSegments = async (db: Db, booking: Record<string, any>, selectedIds: string[]) => {
+  const existing = staySegments(booking);
+  if (existing.length === 0) return null;
+  if (selectedIds.length === 0) throw new HttpError(400, "A guest who is checked in must keep at least one room.");
+
+  const today = todayInIndia();
+  const checkOut = new Date(booking.check_out_date);
+  const segments: StaySegment[] = [];
+  const stillThere = new Set(selectedIds);
+
+  for (const segment of existing) {
+    const from = new Date(segment.from);
+    const to = new Date(segment.to);
+    if (stillThere.has(segment.room_id) || to.getTime() <= today) {
+      segments.push(segment);
+    } else if (from.getTime() < today) {
+      // Left today: the nights before today stay charged.
+      const nights = nightsBetween(from, new Date(today));
+      segments.push({ ...segment, to: new Date(today), nights, amount: money(segment.rate * nights) });
+    }
+    // A room that was never entered (its first night is today or later) is dropped.
+  }
+
+  const held = new Set(segments.map((segment) => segment.room_id));
+  const added = selectedIds.filter((id) => !held.has(id));
+  if (added.length > 0) {
+    const roomsById = new Map((await loadRooms(db, booking.outlet_id)).map((room) => [String(room._id), room as Record<string, any>]));
+    const checkIn = new Date(booking.check_in_date);
+    const from = new Date(Math.max(today, checkIn.getTime()));
+    const nights = nightsBetween(from, checkOut);
+    if (nights >= 1) {
+      const rules = await db
+        .collection("room_pricing_rules")
+        .find({ outlet_id: booking.outlet_id, $or: [{ end_date: { $gte: from } }, { end_date: { $exists: false } }, { end_date: null }], start_date: { $lte: checkOut } })
+        .toArray();
+      for (const id of added) {
+        const room = roomsById.get(id);
+        if (!room) continue;
+        const rate = computePricingForRoom(room, rules, from, checkOut, nights).effective_rate_per_night;
+        segments.push({ room_id: id, code: String(room.code ?? ""), type: roomCategory(room), from, to: checkOut, nights, rate, amount: money(rate * nights), kind: "EXTENSION" });
+      }
+    }
+  }
+
+  const total = money(segments.reduce((sum, segment) => sum + segment.amount, 0));
+  return { segments, total };
 };
 
 export const stayExtension = {

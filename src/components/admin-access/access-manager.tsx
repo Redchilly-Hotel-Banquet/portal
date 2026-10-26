@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Eye, KeyRound, Loader2, Plus, Search, Trash2, UserCog } from "lucide-react";
+import { Eye, Info, KeyRound, Loader2, Plus, Search, Trash2, UserCog } from "lucide-react";
 import { toast } from "sonner";
 import { AdminShell } from "@/components/admin/admin-shell";
 import { ConfirmDialog } from "@/components/admin/confirm-dialog";
@@ -17,9 +17,11 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getAdminOutlets } from "@/hooks/useAdminAccess";
 import { apiPost } from "@/lib/apiClient";
+import { AccountInfoSheet, type InfoTarget } from "./account-info-sheet";
 import { AccessFields, ROLE_OPTIONS, type BranchOption } from "./access-fields";
 
 type Account = { id: string; email: string; name: string; picture: string | null; roles: string[]; outlets: string[]; isActive: boolean };
+type GuestHit = { key: string; name: string; phone: string; email: string; bookings: number };
 type Login = { id: string; name: string; roles: string[]; outlets: string[]; isActive: boolean; hasPassword: boolean; passwordUpdatedAt: string | null };
 
 const messageOf = (error: unknown, fallback: string) => (error instanceof Error && error.message ? error.message : fallback);
@@ -53,6 +55,7 @@ function AccountsTab({ branches }: { branches: BranchOption[] }) {
   const [term, setTerm] = useState("");
   const [q, setQ] = useState("");
   const [editing, setEditing] = useState<Account | null>(null);
+  const [viewing, setViewing] = useState<InfoTarget | null>(null);
   const [roles, setRoles] = useState<string[]>([]);
   const [outlets, setOutlets] = useState<string[]>([]);
   const [active, setActive] = useState(true);
@@ -64,10 +67,9 @@ function AccountsTab({ branches }: { branches: BranchOption[] }) {
 
   const results = useQuery({
     queryKey: ["access-users", q],
-    queryFn: () => apiPost<{ users: Account[]; more: boolean }>("/admin/access", { action: "users_search", q }, true),
-    // Nobody is listed until a search is typed: there can be thousands of accounts.
-    enabled: q.length >= 2,
+    queryFn: () => apiPost<{ users: Account[]; guests: GuestHit[]; more: boolean; staffOnly: boolean }>("/admin/access", { action: "users_search", q }, true),
   });
+  const searching = q.length >= 2;
 
   const open = (account: Account) => {
     setEditing(account);
@@ -90,20 +92,21 @@ function AccountsTab({ branches }: { branches: BranchOption[] }) {
     <div className="space-y-4">
       <div className="relative max-w-md">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" strokeWidth={1.75} aria-hidden />
-        <Input type="search" value={term} onChange={(e) => setTerm(e.target.value)} placeholder="Search by name or email" aria-label="Search accounts" className="pl-9" />
+        <Input type="search" value={term} onChange={(e) => setTerm(e.target.value)} placeholder="Search by name, phone or email" aria-label="Search accounts and guests" className="pl-9" />
       </div>
       <p className="text-xs text-muted-foreground">
-        People appear here after they sign in with Google once. Search for them, then give them roles and branches.
+        {searching
+          ? "Search results. Info shows how a person has used the hotel; Manage access sets their roles and branches. People who have only booked, without signing in, are listed separately."
+          : "People who already have access are listed below. To find anyone else, type at least two letters of their name or email, or part of a phone number."}
       </p>
+      {!searching ? <h2 className="eyebrow">People with access</h2> : null}
 
-      {q.length < 2 ? (
-        <EmptyState icon={Search} title="Search for a person" description="Type at least two letters of their name or email." />
-      ) : results.isLoading ? (
+      {results.isLoading ? (
         <div className="space-y-2">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-14 w-full" />)}</div>
       ) : results.isError ? (
         <p role="alert" className="text-sm text-destructive">{messageOf(results.error, "Could not search")}</p>
-      ) : (results.data?.users.length ?? 0) === 0 ? (
-        <EmptyState icon={UserCog} title="No accounts found" description={q ? "Try another name or email." : "No one has signed in yet."} />
+      ) : (results.data?.users.length ?? 0) === 0 && (results.data?.guests.length ?? 0) === 0 ? (
+        <EmptyState icon={UserCog} title={searching ? "No accounts found" : "No one has access yet"} description={searching ? "Try another name or email." : "Search for a person to give them access."} />
       ) : (
         <>
         <ul className="divide-y rounded-md border bg-card">
@@ -114,13 +117,44 @@ function AccountsTab({ branches }: { branches: BranchOption[] }) {
                 <span className="block truncate text-xs text-muted-foreground">{account.email}{account.isActive ? "" : " · Deactivated"}</span>
                 <span className="mt-1 block"><Summary roles={account.roles} outlets={account.outlets} branches={branches} /></span>
               </span>
-              <Button size="sm" variant="outline" onClick={() => open(account)}>Manage access</Button>
+              <span className="flex items-center gap-2">
+                <Button size="sm" variant="ghost" onClick={() => setViewing({ kind: "account", id: account.id, name: account.name, email: account.email })}>
+                  <Info className="mr-1.5 h-4 w-4" strokeWidth={1.75} aria-hidden />
+                  Info
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => open(account)}>Manage access</Button>
+              </span>
             </li>
           ))}
         </ul>
         {results.data?.more ? <p className="text-xs text-muted-foreground">Showing the first 25. Type more of the name or email to narrow it down.</p> : null}
         </>
       )}
+
+      {searching && (results.data?.guests.length ?? 0) > 0 ? (
+        <section className="space-y-2">
+          <h2 className="eyebrow">Guests without a Google account</h2>
+          <p className="text-xs text-muted-foreground">Found on their bookings by name, phone or email. They cannot be given access until they sign in with Google.</p>
+          <ul className="divide-y rounded-md border bg-card">
+            {results.data!.guests.map((guest) => (
+              <li key={guest.key} className="flex flex-wrap items-center justify-between gap-3 p-3">
+                <span className="min-w-0">
+                  <span className="block truncate font-medium">{guest.name || "Guest"}</span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {[guest.phone, guest.email].filter(Boolean).join(" · ") || "No contact on file"} · {guest.bookings} booking{guest.bookings === 1 ? "" : "s"}
+                  </span>
+                </span>
+                <Button size="sm" variant="ghost" onClick={() => setViewing({ kind: "guest", key: guest.key, name: guest.name, email: guest.email, phone: guest.phone })}>
+                  <Info className="mr-1.5 h-4 w-4" strokeWidth={1.75} aria-hidden />
+                  Info
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      <AccountInfoSheet account={viewing} onClose={() => setViewing(null)} />
 
       <Sheet open={editing !== null} onOpenChange={(next) => !save.isPending && !next && setEditing(null)}>
         <SheetContent className="w-full overflow-y-auto sm:max-w-md">

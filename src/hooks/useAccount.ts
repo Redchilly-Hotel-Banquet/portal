@@ -20,6 +20,8 @@ export type Profile = {
   roles: string[];
   outlets: string[];
   saved: SavedSummary;
+  /** Earlier bookings that were just added to this account through its phone number. Only sent after a save. */
+  linkedBookings?: number;
 };
 
 /** Saved ID and signature, returned only to their owner for autofill. */

@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "generate-jwt": "node scripts/gen-jwt-secret.mjs"
+    "generate-jwt": "node scripts/gen-jwt-secret.mjs",
+    "db:indexes": "node --env-file=.env.local scripts/create-indexes.mjs"
   },
   "engines": {
     "node": ">=20"

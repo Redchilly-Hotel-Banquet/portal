@@ -82,7 +82,11 @@ export function roomsHeldDuring(booking: Doc | null | undefined, from: Date, to:
   const overlaps = (start: number, end: number) =>
     inclusive ? start <= to.getTime() && end >= from.getTime() : start < to.getTime() && end > from.getTime();
   if (segments.length > 0) {
-    return Array.from(new Set(segments.filter((segment) => overlaps(time(segment.from), time(segment.to))).map((segment) => segment.room_id)));
+    // Segments are exact nights, so a room is held only for the nights it was used. Another guest may arrive on
+    // the day a room is left, which is why the shared boundary day is not counted here.
+    return Array.from(
+      new Set(segments.filter((segment) => time(segment.from) < to.getTime() && time(segment.to) > from.getTime()).map((segment) => segment.room_id)),
+    );
   }
   if (!booking?.check_in_date || !booking?.check_out_date) return assignedRoomIds(booking);
   return overlaps(time(booking.check_in_date), time(booking.check_out_date)) ? assignedRoomIds(booking) : [];

@@ -5,6 +5,7 @@ import { HttpError } from "../../httpError";
 import { mongoConnection } from "../../mongo";
 import { signSession, type AuthenticatedUser } from "../../session";
 import { stringifyId, toObjectId } from "../../utils/objectId";
+import { tenDigitPhone } from "../../../lib/phone";
 import { currentRoomIds, isCheckinLocked } from "../../utils/roomAssignments";
 import { parseImageDataUrl, r2 } from "../../storage/r2";
 
@@ -71,6 +72,9 @@ const dataUrl = (value: unknown, label: string, max: number): string => {
   if (value.length > max) throw new HttpError(400, `${label} is too large. Use a smaller image`);
   return value;
 };
+
+/** Matches a stored phone number written any way ("98765 43210", "+91-98765-43210", "09876543210"). */
+export const phonePattern = (tenDigits: string) => `^\\D*(?:91\\D*|0\\D*)?${tenDigits.split("").join("\\D*")}\\D*$`;
 
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -374,6 +378,8 @@ export const userService = {
     const matches: Record<string, unknown>[] = [];
     if (user.src === "user") matches.push({ user_id: user.id });
     if (user.email) matches.push({ guest_email: { $regex: `^${escapeRegex(user.email)}$`, $options: "i" } });
+    // Bookings found through the phone number saved on the profile (see linkBookingsByPhone).
+    if (user.src === "user") matches.push({ linked_user_ids: user.id });
     if (matches.length === 0) return { upcoming: [], past: [] };
 
     const docs = await db
@@ -510,6 +516,31 @@ export const userService = {
       { returnDocument: "after" },
     );
     if (!updated) throw new HttpError(404, "Account not found");
-    return toProfile(updated as UserDocument);
+
+    // A new phone number brings in the earlier bookings made with it.
+    const linked = input.phone !== undefined ? await this.linkBookingsByPhone(String(id), String(changes.phone ?? "")) : 0;
+    return { ...toProfile(updated as UserDocument), linkedBookings: linked };
+  },
+
+  /**
+   * Shows earlier bookings made with this phone number under the account. Only bookings no account owns are
+   * linked, and the link is separate from ownership: it puts them in "My bookings" but does not open their ID
+   * photos or let anyone order to the room, because a phone number is typed in, not verified. Bookings linked
+   * through an earlier number are released when the number changes.
+   */
+  async linkBookingsByPhone(userId: string, rawPhone: string): Promise<number> {
+    const bookings = mongoConnection.getDb().collection("bookings");
+    const ten = tenDigitPhone(rawPhone);
+    const matchesPhone = ten ? { guest_phone: { $regex: phonePattern(ten) } } : null;
+    await bookings.updateMany(
+      { linked_user_ids: userId, ...(matchesPhone ? { $nor: [matchesPhone] } : {}) },
+      { $pull: { linked_user_ids: userId } } as any,
+    );
+    if (!matchesPhone) return 0;
+    const result = await bookings.updateMany(
+      { ...matchesPhone, $or: [{ user_id: { $exists: false } }, { user_id: null }, { user_id: "" }], linked_user_ids: { $ne: userId } },
+      { $addToSet: { linked_user_ids: userId } } as any,
+    );
+    return result.modifiedCount;
   },
 };
