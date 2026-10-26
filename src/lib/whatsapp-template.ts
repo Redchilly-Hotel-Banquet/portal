@@ -3,35 +3,52 @@ export const DEFAULT_WHATSAPP_TEMPLATE = `Welcome to {hotel}, {guest}!
 
 Room: {room}
 Check-in ID: {checkin_id}
-To order food to your room, scan the QR code in your room, choose Room and enter this ID. Please do not share it.
+
+To order food to your room, scan the QR code in your room or visit https://redchilly.in/qr?room={room}&outlet={hotel}, choose Room and enter this ID. Please do not share it.
 
 {wifi}
 
-{note}`;
+{note}
+
+We strive for your pleasant stay! Thank you for choosing {hotel}.`;
 
 export const TEMPLATE_PLACEHOLDERS: Array<{ key: string; description: string }> = [
   { key: "guest", description: "The guest's name" },
-  { key: "hotel", description: "The branch name" },
+  { key: "hotel", description: "The branch name. Inside a link it becomes the branch code the QR page needs, with + for spaces" },
   { key: "room", description: "Room number or numbers" },
   { key: "checkin_id", description: "The 6-digit check-in ID used to order food" },
   { key: "wifi", description: "Wi-Fi name and password for the floor of the guest's room" },
   { key: "note", description: "The branch's welcome note" },
 ];
 
+/** A value as it must appear in a link: spaces become +, anything else unsafe is percent-encoded. */
+export const encodeForLink = (value: string): string => encodeURIComponent(value).replace(/%20/g, "+");
+
 /**
- * Fills the placeholders. A line made only of placeholders that turn out empty (no Wi-Fi set, no note) is left
- * out, so the message never has gaps or half-sentences.
+ * Fills the placeholders. Inside a link (text starting http:// or https://) every value is made link-safe, with
+ * + for spaces, and {hotel} after `outlet=` is the branch's code (`hotel_key`), because that is what the QR page
+ * looks the branch up by. Outside links values are written as they are, spaces and all. A line made only of
+ * placeholders that turn out empty (no Wi-Fi set, no note) is left out, so the message never has gaps.
  */
 export function renderTemplate(template: string, values: Record<string, string>): string {
   const lines = template.replace(/\r\n/g, "\n").split("\n");
   const out: string[] = [];
   for (const line of lines) {
     let hadPlaceholder = false;
-    const filled = line.replace(/\{(\w+)\}/g, (match, key: string) => {
-      if (!(key in values)) return match;
-      hadPlaceholder = true;
-      return values[key];
-    });
+    // Links first, so their placeholders get link treatment; the rest of the line is plain text.
+    const filled = line
+      .split(/(https?:\/\/[^\s]*)/)
+      .map((part, index) => {
+        const inLink = index % 2 === 1;
+        return part.replace(/\{(\w+)\}/g, (match, key: string, offset: number) => {
+          if (!(key in values)) return match;
+          hadPlaceholder = true;
+          if (!inLink) return values[key];
+          const useBranchCode = key === "hotel" && part.slice(0, offset).endsWith("outlet=") && "hotel_key" in values;
+          return encodeForLink(useBranchCode ? values.hotel_key : values[key]);
+        });
+      })
+      .join("");
     if (hadPlaceholder && filled.trim() === "") continue;
     out.push(filled);
   }

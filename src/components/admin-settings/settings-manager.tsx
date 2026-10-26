@@ -137,6 +137,7 @@ export function SettingsManager() {
     return renderTemplate(form.whatsapp_template.trim() || DEFAULT_WHATSAPP_TEMPLATE, {
       guest: "Asha Verma",
       hotel: branch?.name || branch?.location_key || "Red Chilly",
+      hotel_key: branch?.location_key ?? "",
       room: "101",
       checkin_id: "123456",
       wifi: [name ? `Wi-Fi: ${name}` : "", password ? `Wi-Fi password: ${password}` : ""].filter(Boolean).join("\n"),

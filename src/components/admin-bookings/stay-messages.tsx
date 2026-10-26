@@ -78,6 +78,8 @@ export const welcomeMessage = (
   return renderTemplate(welcome?.whatsapp_template?.trim() || DEFAULT_WHATSAPP_TEMPLATE, {
     guest: guestName,
     hotel: welcome?.name || "Red Chilly",
+    // The code the QR page looks the branch up by; used when {hotel} sits inside a link.
+    hotel_key: booking.outlet_id ?? welcome?.name ?? "",
     room: roomCodes(booking).join(", "),
     checkin_id: booking.checkin_id ?? "",
     wifi: wifiText,
