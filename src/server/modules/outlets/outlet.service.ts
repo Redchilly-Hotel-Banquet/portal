@@ -3,6 +3,7 @@ import { HttpError } from "../../httpError";
 import { normalizeDocument } from "../../utils/normalizers";
 import { stringifyId, toObjectId } from "../../utils/objectId";
 import { ManageOutletRequest, ManageOutletAction } from "./outlet.types";
+import { MAX_FLOORS, isKnownFloor } from "../../../lib/floors";
 import type { AuthenticatedUser } from "../../session";
 import { assertAdmin, assertOutlet } from "../../utils/access";
 
@@ -71,6 +72,16 @@ const buildOutletPayload = (
     if (field in input) {
       payload[field] = toStringOrEmpty(input[field]);
     }
+  }
+
+  // How many floors the branch has above the ground floor. Rooms and Wi-Fi settings choose from them.
+  if ("floors_max" in input) {
+    const raw = input.floors_max;
+    const count = raw === null || raw === "" ? null : Number(raw);
+    if (count !== null && (!Number.isInteger(count) || count < 0 || count > MAX_FLOORS)) {
+      throw new HttpError(400, `The highest floor must be a whole number from 0 to ${MAX_FLOORS}.`);
+    }
+    payload.floors_max = count;
   }
 
   // GST number: 15 characters in the government's format. Blank clears it.
@@ -172,6 +183,11 @@ export class OutletService {
         const current = await outletsCollection.findOne(filter);
         if (!current) throw new HttpError(404, "Outlet not found");
         assertOutlet(user, current.location_key);
+        // Wi-Fi is set per floor, so each floor named must be one the branch has.
+        const highest = "floors_max" in payload ? (payload.floors_max as number | null) : ((current.floors_max as number | null | undefined) ?? null);
+        for (const row of (payload.wifi_floors as Array<{ floor: string }> | undefined) ?? []) {
+          if (!isKnownFloor(highest, row.floor)) throw new HttpError(400, `"${row.floor}" is not one of this branch's floors. Set the floors first.`);
+        }
         const { matchedCount } = await outletsCollection.updateOne(filter, { $set: payload });
         if (!matchedCount) throw new HttpError(404, "Outlet not found");
         return { success: true };

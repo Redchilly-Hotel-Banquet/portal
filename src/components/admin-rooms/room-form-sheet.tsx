@@ -1,6 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { apiGet } from "@/lib/apiClient";
+import { floorLabel, floorOptions } from "@/lib/floors";
+import { useEffect, useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -61,6 +64,12 @@ type Props = {
 };
 
 export function RoomFormSheet({ open, onOpenChange, room, outlets, outletsLoading, categories, saving, onSubmit }: Props) {
+  // Each branch decides its own floors under Settings; the choices follow the branch picked above.
+  const floorConfig = useQuery({
+    queryKey: ["branch-floors"],
+    queryFn: () => apiGet<{ outlets?: Array<{ location_key?: string; floors_max?: number | null }> }>("/public/outlets"),
+    staleTime: 60_000,
+  });
   const [form, setForm] = useState<FormState>(() => blank(""));
   const [errors, setErrors] = useState<Errors>({});
 
@@ -86,6 +95,12 @@ export function RoomFormSheet({ open, onOpenChange, room, outlets, outletsLoadin
       return next;
     });
   };
+
+  const highestFloor = useMemo(() => {
+    const found = (floorConfig.data?.outlets ?? []).find((outlet) => outlet.location_key === form.outlet_id);
+    return Number.isInteger(found?.floors_max) ? Number(found?.floors_max) : null;
+  }, [floorConfig.data, form.outlet_id]);
+  const floorChoices = floorOptions(highestFloor, [form.level]);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -201,7 +216,18 @@ export function RoomFormSheet({ open, onOpenChange, room, outlets, outletsLoadin
               ) : null}
               <div className={isRoom ? "space-y-1.5" : "space-y-1.5 sm:col-span-2"}>
                 <Label htmlFor="room-level">Floor</Label>
-                <Input id="room-level" value={form.level} onChange={(e) => set("level", e.target.value)} placeholder="Ground, 1, 2" disabled={saving} />
+                <Select value={form.level.trim() || "none"} onValueChange={(value) => set("level", value === "none" ? "" : value)} disabled={saving}>
+                  <SelectTrigger id="room-level" aria-describedby="room-level-hint"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Not set</SelectItem>
+                    {floorChoices.map((floor) => (
+                      <SelectItem key={floor} value={floor}>{floorLabel(floor)}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p id="room-level-hint" className="text-xs text-muted-foreground">
+                  {highestFloor === null && form.outlet_id ? "This branch has not set its floors yet. Set them under Settings to choose more." : "The floors come from Settings."}
+                </p>
               </div>
             </div>
 

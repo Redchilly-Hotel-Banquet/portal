@@ -15,11 +15,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { toBranch, type Branch, type WifiFloorRow } from "@/components/admin-branches/types";
 import { getAdminOutlets, hasOutletAccess } from "@/hooks/useAdminAccess";
 import { apiPost } from "@/lib/apiClient";
+import { MAX_FLOORS, floorLabel, floorOptions } from "@/lib/floors";
 import { DEFAULT_WHATSAPP_TEMPLATE, TEMPLATE_PLACEHOLDERS, renderTemplate } from "@/lib/whatsapp-template";
 
 const KEY = ["admin-branches"];
 
 type Form = {
+  /** "" until the branch has set its floors, otherwise the highest floor as text. */
+  floors_max: string;
   legal_name: string;
   gstin: string;
   invoice_address: string;
@@ -34,6 +37,7 @@ type Form = {
 };
 
 const fromBranch = (b: Branch): Form => ({
+  floors_max: b.floors_max === null ? "" : String(b.floors_max),
   legal_name: b.legal_name,
   gstin: b.gstin,
   invoice_address: b.invoice_address,
@@ -114,6 +118,7 @@ export function SettingsManager() {
           id: branch?.id,
           data: {
             ...form,
+            floors_max: form?.floors_max === "" ? null : Number(form?.floors_max),
             gstin: form?.gstin.replace(/\s+/g, "").toUpperCase(),
             wifi_floors: (form?.wifi_floors ?? []).filter((row) => row.floor.trim()),
             whatsapp_template: form?.whatsapp_template.trim() === DEFAULT_WHATSAPP_TEMPLATE ? "" : form?.whatsapp_template,
@@ -202,13 +207,44 @@ export function SettingsManager() {
                 </Field>
               </Section>
 
+              <Section title="Floors" description="The floors this branch has. Rooms and the Wi-Fi settings below choose their floor from this list.">
+                <div className="max-w-xs space-y-1.5">
+                  <Label htmlFor="s-floors">Highest floor</Label>
+                  <Select value={form.floors_max === "" ? "unset" : form.floors_max} onValueChange={(value) => set("floors_max", value === "unset" ? "" : value)}>
+                    <SelectTrigger id="s-floors"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="unset">Not set</SelectItem>
+                      <SelectItem value="0">Ground floor only</SelectItem>
+                      {Array.from({ length: MAX_FLOORS }, (_, index) => index + 1).map((count) => (
+                        <SelectItem key={count} value={String(count)}>
+                          Floor {count} (Ground to {count})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    {form.floors_max === "" ? "Until this is set, rooms can be given any floor." : `Floors: ${floorOptions(Number(form.floors_max)).join(", ")}.`}
+                  </p>
+                </div>
+              </Section>
+
               <Section title="Wi-Fi" description="Sent to guests in the welcome message. A guest gets the Wi-Fi for the floor of their room.">
                 <div className="space-y-3">
                   {form.wifi_floors.map((row, index) => (
                     <div key={index} className="grid gap-2 rounded-md border border-border p-3 sm:grid-cols-[6rem_1fr_1fr_auto] sm:items-end">
                       <div className="space-y-1">
                         <Label htmlFor={`f-floor-${index}`} className="text-xs">Floor</Label>
-                        <Input id={`f-floor-${index}`} value={row.floor} onChange={(e) => setFloor(index, { floor: e.target.value })} placeholder="Ground" autoComplete="off" />
+                        <Select value={row.floor || "choose"} onValueChange={(value) => setFloor(index, { floor: value === "choose" ? "" : value })}>
+                          <SelectTrigger id={`f-floor-${index}`}><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="choose" disabled>Choose</SelectItem>
+                            {floorOptions(form.floors_max === "" ? 0 : Number(form.floors_max), [row.floor]).map((floor) => (
+                              <SelectItem key={floor} value={floor} disabled={form.wifi_floors.some((other, i) => i !== index && other.floor === floor)}>
+                                {floorLabel(floor)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
                       <div className="space-y-1">
                         <Label htmlFor={`f-name-${index}`} className="text-xs">Wi-Fi name</Label>
@@ -227,7 +263,7 @@ export function SettingsManager() {
                     <Plus className="mr-2 h-4 w-4" strokeWidth={1.75} aria-hidden />
                     Add a floor
                   </Button>
-                  <p className="text-xs text-muted-foreground">Type the floor as it is on the room (its Floor field), for example Ground or 1.</p>
+                  <p className="text-xs text-muted-foreground">Choose the floor the Wi-Fi is for. Rooms on that floor get it in their welcome message.</p>
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field id="s-wifi" label="Default Wi-Fi name" hint="For rooms whose floor is not listed above.">

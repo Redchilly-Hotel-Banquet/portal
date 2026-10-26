@@ -12,6 +12,8 @@ export type Branch = {
   wifi_password: string;
   welcome_message: string;
   wifi_floors: WifiFloorRow[];
+  /** Floors above the ground floor, set under Settings. null until set. */
+  floors_max: number | null;
   legal_name: string;
   gstin: string;
   invoice_address: string;
@@ -48,6 +50,7 @@ export function toBranch(raw: Record<string, unknown>): Branch | null {
     invoice_email: str(raw.invoice_email),
     invoice_terms: str(raw.invoice_terms),
     whatsapp_template: str(raw.whatsapp_template),
+    floors_max: Number.isInteger(raw.floors_max) ? Number(raw.floors_max) : null,
     wifi_floors: Array.isArray(raw.wifi_floors)
       ? (raw.wifi_floors as Record<string, unknown>[]).map((row) => ({ floor: str(row?.floor), wifi_name: str(row?.wifi_name), wifi_password: str(row?.wifi_password) }))
       : [],

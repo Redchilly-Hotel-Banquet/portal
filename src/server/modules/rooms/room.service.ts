@@ -1,3 +1,4 @@
+import { isKnownFloor } from "../../../lib/floors";
 import { assertAdmin, assertOutlet, isAdmin, outletFilter } from "../../utils/access";
 import { mongoConnection } from "../../mongo";
 import { assignedRoomIds, bookingViewForWindow } from "../../utils/roomAssignments";
@@ -352,6 +353,16 @@ const sanitisePricingPayload = (rule: Record<string, unknown>) => {
   };
 };
 
+/** A room's floor must be one of its branch's floors, once the branch has set them under Settings. */
+const assertFloor = async (db: import("mongodb").Db, outletId: unknown, level: unknown) => {
+  const clean = typeof level === "string" ? level.trim() : "";
+  if (!clean) return;
+  const outlet = await db.collection("outlets").findOne({ location_key: outletId } as Record<string, unknown>, { projection: { floors_max: 1 } });
+  if (!isKnownFloor((outlet?.floors_max as number | null | undefined) ?? null, clean)) {
+    throw new HttpError(400, `"${clean}" is not one of this branch's floors. Choose a floor from the list, or set the branch's floors under Settings.`);
+  }
+};
+
 export class RoomService {
   async getAvailability(payload: AvailabilityRequest) {
     const { outlet_id, check_in_date, check_out_date } = payload;
@@ -576,6 +587,7 @@ export class RoomService {
         }
         const payloadDoc = sanitiseRoomPayload(data as Record<string, unknown>);
         assertOutlet(user, payloadDoc.outlet_id);
+        await assertFloor(db, payloadDoc.outlet_id, payloadDoc.level);
         const insertResult = await roomsCollection.insertOne(payloadDoc);
         return {
           id: toStringId(insertResult.insertedId) ?? String(insertResult.insertedId),
@@ -605,6 +617,10 @@ export class RoomService {
         }
         const payloadDoc = sanitiseRoomPayload({ ...existing, ...data } as Record<string, unknown>);
         assertOutlet(user, payloadDoc.outlet_id);
+        // A floor is only checked when it is being changed, so a room saved before floors were set up can still be edited.
+        if (String(payloadDoc.level ?? "") !== String(existing.level ?? "") || payloadDoc.outlet_id !== existing.outlet_id) {
+          await assertFloor(db, payloadDoc.outlet_id, payloadDoc.level);
+        }
         payloadDoc.created_at = existing.created_at ?? payloadDoc.created_at;
         await roomsCollection.updateOne({ _id: objectId } as Record<string, unknown>, {
           $set: {
