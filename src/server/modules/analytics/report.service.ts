@@ -26,7 +26,7 @@ const KIND_LABEL: Record<Kind, string> = { branches: "Branches", guests: "Guests
 const STALE_MS = 10 * 60_000;
 
 type ReportRequest = {
-  action?: "list" | "create" | "download" | "delete";
+  action?: "list" | "list_all" | "create" | "download" | "delete";
   kind?: string;
   format?: string;
   from?: string;
@@ -71,6 +71,10 @@ const present = (doc: any) => {
     created_at: doc.created_at,
     completed_at: doc.completed_at ?? null,
     created_by_name: doc.created_by_name ?? "",
+    period_from: doc.filters?.from ?? null,
+    period_to: doc.filters?.to ?? null,
+    /** Branch keys the report covers; "*" is every branch. */
+    branches: Array.isArray(doc.coverage) ? doc.coverage : [],
   };
 };
 
@@ -340,6 +344,15 @@ export const reportService = {
         if (doc.r2_key) await r2.remove(doc.r2_key);
         await col().deleteOne({ _id: doc._id });
         return { ok: true };
+      }
+
+      case "list_all": {
+        // Every report this account may open, newest first, whatever its kind, period or branches.
+        const scope = user.outlets.includes("all")
+          ? {}
+          : { "coverage.0": { $exists: true }, coverage: { $not: { $elemMatch: { $nin: user.outlets } } } };
+        const docs = await col().find(scope).sort({ created_at: -1 }).limit(200).toArray();
+        return { reports: docs.map(present) };
       }
 
       default: {

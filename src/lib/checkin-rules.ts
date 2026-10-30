@@ -42,3 +42,37 @@ export const normaliseCheckinRules = (value: unknown): CheckinRules => {
   }
   return rules;
 };
+
+/**
+ * Rules per branch. A set covers every branch (`outlets` empty, including branches added later) or the branches
+ * listed. A branch uses the set that lists it, else the every-branch set, else the defaults.
+ */
+export type CheckinRuleSet = { outlets: string[]; rules: CheckinRules };
+
+export const normaliseCheckinRuleSets = (value: unknown): CheckinRuleSet[] => {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 50).map((row) => {
+    const source = (row ?? {}) as Record<string, unknown>;
+    const outlets = Array.isArray(source.outlets) ? source.outlets.map((o) => (typeof o === "string" ? o.trim() : "")).filter(Boolean) : [];
+    return { outlets: Array.from(new Set(outlets)), rules: normaliseCheckinRules(source.rules) };
+  });
+};
+
+/** The first problem with a list of rule sets, or null when it can be saved. */
+export const checkinRuleSetsError = (sets: CheckinRuleSet[], knownOutlets?: string[]): string | null => {
+  if (sets.filter((set) => set.outlets.length === 0).length > 1) return "Only one set of rules can cover every branch.";
+  const seen = new Set<string>();
+  for (const set of sets) {
+    for (const outlet of set.outlets) {
+      if (knownOutlets && !knownOutlets.includes(outlet)) return `A set of rules names a branch that does not exist (${outlet}).`;
+      if (seen.has(outlet)) return `${outlet} is in more than one set of rules. A branch can only follow one.`;
+      seen.add(outlet);
+    }
+  }
+  return null;
+};
+
+export const rulesForOutlet = (sets: CheckinRuleSet[], outletKey?: string | null): CheckinRules =>
+  (outletKey ? sets.find((set) => set.outlets.includes(outletKey)) : undefined)?.rules ??
+  sets.find((set) => set.outlets.length === 0)?.rules ??
+  DEFAULT_CHECKIN_RULES;

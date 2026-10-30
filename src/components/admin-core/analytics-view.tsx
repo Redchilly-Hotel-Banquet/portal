@@ -38,7 +38,7 @@ import { TrendsTab } from "./trends-tab";
 import { PaymentSources } from "./payment-sources";
 import { PeriodPicker, defaultPeriod, periodLabel, type Period } from "./period-picker";
 
-const TAB_TITLE: Record<string, string> = { branches: "Branch analytics", guests: "Guest analytics", trends: "Trends" };
+const TAB_TITLE: Record<string, string> = { branches: "Branch analytics", guests: "Guest analytics", trends: "Trends", reports: "Reports" };
 
 const SORT_LABEL: Record<SortKey, string> = {
   revenue: "Revenue",
@@ -67,6 +67,7 @@ export function AnalyticsView() {
   const [trendsRange, setTrendsRange] = useState<Range>(defaultRange);
   const user = getAdminUser()?.name ?? "";
   const exportRange = tab === "guests" ? guestsRange : tab === "trends" ? trendsRange : period;
+  const isReports = tab === "reports";
   const captureRef = useRef<HTMLDivElement>(null);
   const [capturing, setCapturing] = useState(false);
 
@@ -123,6 +124,8 @@ export function AnalyticsView() {
     return `${branches.length === 0 ? "All branches" : "Selected"} (${chosen.length}): ${chosen.map((o) => o.name).join(", ") || "none"}`;
   }, [branches, branchOptions]);
 
+  const branchNames = useMemo(() => Object.fromEntries(branchOptions.map((o) => [o.id, o.name])), [branchOptions]);
+
   const totals = useMemo(() => sumOutlets(scoped), [scoped]);
 
   const actions = (
@@ -135,11 +138,15 @@ export function AnalyticsView() {
           </Button>
         </>
       ) : null}
-      <ExportMenu kind={tab as "branches" | "guests" | "trends"} from={exportRange.from} to={exportRange.to} outlets={branches} />
-      <Button variant="outline" size="sm" onClick={() => void screenshot()} disabled={capturing}>
-        <Camera className="mr-2 h-4 w-4" strokeWidth={1.75} aria-hidden />
-        {capturing ? "Capturing" : "Screenshot"}
-      </Button>
+      {isReports ? null : (
+        <>
+          <ExportMenu kind={tab as "branches" | "guests" | "trends"} from={exportRange.from} to={exportRange.to} outlets={branches} />
+          <Button variant="outline" size="sm" onClick={() => void screenshot()} disabled={capturing}>
+            <Camera className="mr-2 h-4 w-4" strokeWidth={1.75} aria-hidden />
+            {capturing ? "Capturing" : "Screenshot"}
+          </Button>
+        </>
+      )}
     </>
   );
 
@@ -156,10 +163,13 @@ export function AnalyticsView() {
             <TabsTrigger value="branches">Branches</TabsTrigger>
             <TabsTrigger value="guests">Guests</TabsTrigger>
             <TabsTrigger value="trends">Trends</TabsTrigger>
+            <TabsTrigger value="reports">Reports</TabsTrigger>
           </TabsList>
-          <BranchFilter options={branchOptions} selected={branches} onChange={setBranches} />
+          {isReports ? null : <BranchFilter options={branchOptions} selected={branches} onChange={setBranches} />}
         </div>
-        <ReportsPanel kind={tab as "branches" | "guests" | "trends"} from={exportRange.from} to={exportRange.to} outlets={branches} />
+        <TabsContent value="reports" className="mt-0">
+          <ReportsPanel branchNames={branchNames} />
+        </TabsContent>
         <div ref={captureRef} className="space-y-6 bg-background">
           {capturing ? (
             <header className="rounded-md border border-border bg-card p-4">

@@ -18,6 +18,8 @@ import { toBranch, type Branch, type WifiFloorRow } from "@/components/admin-bra
 import { getAdminOutlets, hasOutletAccess } from "@/hooks/useAdminAccess";
 import { apiPost } from "@/lib/apiClient";
 import { MAX_FLOORS, floorLabel, floorOptions } from "@/lib/floors";
+import { DEFAULT_STAY_TIMES, formatClock, isClock, resolveStayTimes } from "@/lib/stay-times";
+import { variablesForOutlet, type TemplateVariable } from "@/lib/template-variables";
 import { DEFAULT_WHATSAPP_TEMPLATE, TEMPLATE_PLACEHOLDERS, renderTemplate } from "@/lib/whatsapp-template";
 
 const KEY = ["admin-branches"];
@@ -36,6 +38,8 @@ type Form = {
   wifi_floors: WifiFloorRow[];
   welcome_message: string;
   whatsapp_template: string;
+  checkin_time: string;
+  checkout_time: string;
 };
 
 const fromBranch = (b: Branch): Form => ({
@@ -51,6 +55,8 @@ const fromBranch = (b: Branch): Form => ({
   wifi_floors: b.wifi_floors.map((row) => ({ ...row })),
   welcome_message: b.welcome_message,
   whatsapp_template: b.whatsapp_template,
+  checkin_time: b.checkin_time || DEFAULT_STAY_TIMES.checkin_time,
+  checkout_time: b.checkout_time || DEFAULT_STAY_TIMES.checkout_time,
 });
 
 const GSTIN = /^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
@@ -111,6 +117,16 @@ export function SettingsManager() {
 
   const gstinError = form && form.gstin.trim() && !GSTIN.test(form.gstin.replace(/\s+/g, "").toUpperCase()) ? "That is not a valid GST number. It has 15 letters and digits, for example 09ABCDE1234F1Z5." : "";
 
+  const variablesQuery = useQuery({
+    queryKey: ["template-variables"],
+    queryFn: () => apiPost<{ template_variables?: TemplateVariable[] }>("/admin/config", { action: "get" }, true),
+    select: (data) => data?.template_variables ?? [],
+    refetchOnWindowFocus: false,
+  });
+  const branchVariables = useMemo(() => Object.entries(variablesForOutlet(variablesQuery.data ?? [], branchKey)), [variablesQuery.data, branchKey]);
+
+  const timeError = form && (!isClock(form.checkin_time) || !isClock(form.checkout_time)) ? "Enter both times, for example 14:00 and 11:00." : "";
+
   const save = useMutation({
     mutationFn: () =>
       apiPost(
@@ -124,6 +140,8 @@ export function SettingsManager() {
             gstin: form?.gstin.replace(/\s+/g, "").toUpperCase(),
             wifi_floors: (form?.wifi_floors ?? []).filter((row) => row.floor.trim()),
             whatsapp_template: form?.whatsapp_template.trim() === DEFAULT_WHATSAPP_TEMPLATE ? "" : form?.whatsapp_template,
+            checkin_time: form?.checkin_time,
+            checkout_time: form?.checkout_time,
           },
         },
         true,
@@ -141,7 +159,9 @@ export function SettingsManager() {
     const firstFloor = form.wifi_floors.find((row) => row.floor.trim() && (row.wifi_name || row.wifi_password));
     const name = firstFloor?.wifi_name || form.wifi_name;
     const password = firstFloor?.wifi_password || form.wifi_password;
+    const times = resolveStayTimes(form);
     return renderTemplate(form.whatsapp_template.trim() || DEFAULT_WHATSAPP_TEMPLATE, {
+      ...Object.fromEntries(branchVariables),
       guest: "Asha Verma",
       hotel: branch?.name || branch?.location_key || "Red Chilly",
       hotel_key: branch?.location_key ?? "",
@@ -149,8 +169,10 @@ export function SettingsManager() {
       checkin_id: "123456",
       wifi: [name ? `Wi-Fi: ${name}` : "", password ? `Wi-Fi password: ${password}` : ""].filter(Boolean).join("\n"),
       note: form.welcome_message,
+      checkin_time: formatClock(times.checkin_time),
+      checkout_time: formatClock(times.checkout_time),
     });
-  }, [form, branch]);
+  }, [form, branch, branchVariables]);
 
   return (
     <AdminShell scope="admin" title="Settings" description="Branch details and business-wide configuration.">
@@ -187,6 +209,7 @@ export function SettingsManager() {
               onSubmit={(event) => {
                 event.preventDefault();
                 if (gstinError) return toast.error(gstinError);
+                if (timeError) return toast.error(timeError);
                 save.mutate();
               }}
             >
@@ -214,6 +237,18 @@ export function SettingsManager() {
                 <Field id="s-terms" label="Terms and notes at the foot of the invoice" hint="For example refund policy, the place of supply or a thank-you line.">
                   <Textarea id="s-terms" rows={3} value={form.invoice_terms} onChange={(e) => set("invoice_terms", e.target.value)} />
                 </Field>
+              </Section>
+
+              <Section title="Check-in and check-out times" description="When a stay at this branch starts and ends each day, in India time. A booking can only be checked in from its check-in day at the check-in time until its check-out day at the check-out time. After that, reception marks it Cancelled or Checked out.">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field id="s-checkin-time" label="Check-in time">
+                    <Input id="s-checkin-time" type="time" required value={form.checkin_time} onChange={(e) => set("checkin_time", e.target.value)} />
+                  </Field>
+                  <Field id="s-checkout-time" label="Check-out time" hint="Also available in the message as {checkin_time} and {checkout_time}.">
+                    <Input id="s-checkout-time" type="time" required value={form.checkout_time} onChange={(e) => set("checkout_time", e.target.value)} />
+                  </Field>
+                </div>
+                {timeError ? <p role="alert" className="text-xs text-destructive">{timeError}</p> : null}
               </Section>
 
               <Section title="Floors" description="The floors this branch has. Rooms and the Wi-Fi settings below choose their floor from this list.">
@@ -298,7 +333,14 @@ export function SettingsManager() {
                       <dd className="text-muted-foreground">{placeholder.description}</dd>
                     </div>
                   ))}
+                  {branchVariables.map(([key]) => (
+                    <div key={key} className="flex gap-2">
+                      <dt className="font-mono text-foreground">{`{${key}}`}</dt>
+                      <dd className="text-muted-foreground">Your variable</dd>
+                    </div>
+                  ))}
                 </dl>
+                <p className="text-xs text-muted-foreground">Add your own variables, for one branch or several, under Configuration.</p>
                 <div>
                   <p className="mb-1 text-sm font-medium">Preview</p>
                   <pre className="whitespace-pre-wrap rounded-md border bg-muted/40 p-3 font-sans text-sm">{preview}</pre>

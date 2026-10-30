@@ -4,6 +4,7 @@ import { MessageCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { tenDigitPhone, whatsappLink } from "@/lib/phone";
 import { DEFAULT_WHATSAPP_TEMPLATE, renderTemplate } from "@/lib/whatsapp-template";
+import { formatClock, resolveStayTimes } from "@/lib/stay-times";
 import type { Booking, WelcomeInfo } from "./types";
 
 type Recipient = { name: string; phone: string };
@@ -75,7 +76,10 @@ export const welcomeMessage = (
       return [entry.name ? `Wi-Fi${label}: ${entry.name}` : "", entry.password ? `Wi-Fi password${label}: ${entry.password}` : ""].filter(Boolean);
     })
     .join("\n");
+  const times = resolveStayTimes(welcome);
   return renderTemplate(welcome?.whatsapp_template?.trim() || DEFAULT_WHATSAPP_TEMPLATE, {
+    // The business's own variables first, so a built-in name can never be overridden.
+    ...(welcome?.variables ?? {}),
     guest: guestName,
     hotel: welcome?.name || "Red Chilly",
     // The code the QR page looks the branch up by; used when {hotel} sits inside a link.
@@ -84,6 +88,8 @@ export const welcomeMessage = (
     checkin_id: booking.checkin_id ?? "",
     wifi: wifiText,
     note: welcome?.welcome_message ?? "",
+    checkin_time: formatClock(times.checkin_time),
+    checkout_time: formatClock(times.checkout_time),
   });
 };
 

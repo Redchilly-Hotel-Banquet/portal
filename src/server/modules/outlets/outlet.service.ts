@@ -3,6 +3,7 @@ import { HttpError } from "../../httpError";
 import { normalizeDocument } from "../../utils/normalizers";
 import { stringifyId, toObjectId } from "../../utils/objectId";
 import { ManageOutletRequest, ManageOutletAction } from "./outlet.types";
+import { isClock } from "../../../lib/stay-times";
 import { MAX_FLOORS, isKnownFloor } from "../../../lib/floors";
 import type { AuthenticatedUser } from "../../session";
 import { assertAdmin, assertOutlet } from "../../utils/access";
@@ -82,6 +83,14 @@ const buildOutletPayload = (
       throw new HttpError(400, `The highest floor must be a whole number from 0 to ${MAX_FLOORS}.`);
     }
     payload.floors_max = count;
+  }
+
+  // Check-in and check-out times of the day, 24-hour HH:mm in India time. Blank goes back to the default.
+  for (const field of ["checkin_time", "checkout_time"] as const) {
+    if (!(field in input)) continue;
+    const value = toStringOrEmpty(input[field]);
+    if (value && !isClock(value)) throw new HttpError(400, "Enter the time as hours and minutes, for example 14:00.");
+    payload[field] = value;
   }
 
   // GST number: 15 characters in the government's format. Blank clears it.

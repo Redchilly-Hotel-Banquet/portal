@@ -3,6 +3,7 @@ export const DEFAULT_WHATSAPP_TEMPLATE = `Welcome to {hotel}, {guest}!
 
 Room: {room}
 Check-in ID: {checkin_id}
+Check-in: {checkin_time} · Check-out: {checkout_time}
 
 To order food to your room, scan the QR code in your room or visit https://redchilly.in/qr?room={room}&outlet={hotel}, choose Room and enter this ID. Please do not share it.
 
@@ -19,6 +20,8 @@ export const TEMPLATE_PLACEHOLDERS: Array<{ key: string; description: string }> 
   { key: "checkin_id", description: "The 6-digit check-in ID used to order food" },
   { key: "wifi", description: "Wi-Fi name and password for the floor of the guest's room" },
   { key: "note", description: "The branch's welcome note" },
+  { key: "checkin_time", description: "The branch's check-in time, for example 2:00 PM" },
+  { key: "checkout_time", description: "The branch's check-out time, for example 11:00 AM" },
 ];
 
 /** A value as it must appear in a link: spaces become +, anything else unsafe is percent-encoded. */

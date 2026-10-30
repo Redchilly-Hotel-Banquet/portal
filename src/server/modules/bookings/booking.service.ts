@@ -6,11 +6,13 @@ import { normalizeDocument } from "../../utils/normalizers";
 import { stringifyId, toObjectId } from "../../utils/objectId";
 import { configService } from "../config/config.service";
 import { DEFAULT_CHECKIN_RULES } from "../../../lib/checkin-rules";
-import { assignedRoomIds, bookingViewForWindow, currentRoomIds, isCheckinLocked, roomsHeldDuring, staySegments, todayInIndia, type StaySegment } from "../../utils/roomAssignments";
+import { assignedRoomIds, bookingViewForWindow, currentRoomIds, isCheckinLocked, roomsHeldDuring, staySegments, type StaySegment } from "../../utils/roomAssignments";
 import { ensureUniqueCheckinId } from "../../utils/checkinId";
 import { reconcileSegments, stayExtension, type ExtendRequest } from "./stay-extension";
 import { assertAdmin, assertOutlet } from "../../utils/access";
 import { computeGst, type GstSummary } from "../../utils/gst";
+import { variablesForOutlet } from "../../../lib/template-variables";
+import { resolveStayTimes, stayPhase, stayWindow, type StayTimes } from "../../../lib/stay-times";
 import { PAYMENT_MODE_VALUES, type PaymentLine } from "../../../lib/payment-modes";
 import {
   documentFileStem,
@@ -115,24 +117,40 @@ const withoutPending = (status: unknown): string => {
 const MAX_DATA_URL_LENGTH = 10_000_000;
 const DAY_IN_MS = 86_400_000;
 
-const formatStayDay = (value: number): string =>
-  new Date(value).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
+const formatStayMoment = (instant: number): string =>
+  new Date(instant).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" });
 
-/** A guest can only be checked in during the booked stay: from the check-in day up to the day before departure. */
-const assertWithinStay = (booking: object) => {
-  const { check_in_date, check_out_date } = booking as Record<string, unknown>;
-  const from = check_in_date ? new Date(check_in_date as string | number | Date) : null;
-  const to = check_out_date ? new Date(check_out_date as string | number | Date) : null;
-  if (!from || !to || Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return;
-  const today = todayInIndia();
-  const start = Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate());
-  const end = Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), to.getUTCDate());
-  const stay = `${formatStayDay(start)} to ${formatStayDay(end)}`;
-  if (today >= end) {
-    throw new HttpError(409, `This booking was for ${stay} and the stay is over, so it cannot be checked in. Create a new booking for today's stay.`);
+/** The branch's check-in and check-out times; a booking's outlet_id is the branch's location key (older ones, its id). */
+const outletStayTimes = async (outletId: unknown): Promise<StayTimes> => {
+  const key = typeof outletId === "string" ? outletId : outletId ? String(outletId) : "";
+  if (!key) return resolveStayTimes();
+  const objectId = toObjectId(key);
+  const outlet = await mongoConnection
+    .getDb()
+    .collection("outlets")
+    .findOne({ $or: [{ location_key: key }, ...(objectId ? [{ _id: objectId }] : [])] } as any);
+  return resolveStayTimes(outlet as Record<string, unknown> | null);
+};
+
+/**
+ * A guest can only be checked in between the booking's check-in day at the branch's check-in time and its
+ * check-out day at the branch's check-out time. After that the stay is over: reception marks it Cancelled
+ * (guest never came) or Checked out (guest stayed but was never checked in).
+ */
+const assertWithinStay = async (booking: object) => {
+  const { check_in_date, check_out_date, outlet_id } = booking as Record<string, unknown>;
+  const times = await outletStayTimes(outlet_id);
+  const window = stayWindow(check_in_date as string | number | Date | undefined, check_out_date as string | number | Date | undefined, times);
+  if (!window) return;
+  const now = Date.now();
+  if (now >= window.endsAt) {
+    throw new HttpError(
+      409,
+      `The stay for this booking ended on ${formatStayMoment(window.endsAt)}, so it can no longer be checked in. Mark it Cancelled, or Checked out if the guest did stay.`,
+    );
   }
-  if (today < start) {
-    throw new HttpError(409, `This booking is for ${stay}. Check-in opens on ${formatStayDay(start)}.`);
+  if (now < window.opensAt) {
+    throw new HttpError(409, `Check-in for this booking opens on ${formatStayMoment(window.opensAt)}.`);
   }
 };
 
@@ -659,6 +677,7 @@ export class BookingService {
 
         // Wi-Fi and welcome text per branch, for the "send to guest" messages. Staff-only: never public.
         const welcome: Record<string, Record<string, unknown>> = {};
+        const templateVariables = await configService.getTemplateVariables();
         for (const outlet of allOutlets) {
           const key = normaliseString((outlet as any).location_key);
           if (!key) continue;
@@ -669,6 +688,8 @@ export class BookingService {
             wifi_floors: Array.isArray((outlet as any).wifi_floors) ? (outlet as any).wifi_floors : [],
             welcome_message: normaliseString((outlet as any).welcome_message),
             whatsapp_template: normaliseString((outlet as any).whatsapp_template),
+            ...resolveStayTimes(outlet as Record<string, unknown>),
+            variables: variablesForOutlet(templateVariables, key),
           };
         }
 
@@ -695,7 +716,7 @@ export class BookingService {
         if (String(current.status).toUpperCase() === "CHECKED_OUT") {
           throw new HttpError(409, "A checked-out booking cannot be changed.");
         }
-        if (nextStatus === "CHECKED_IN" && String(current.status).toUpperCase() !== "CHECKED_IN") assertWithinStay(current);
+        if (nextStatus === "CHECKED_IN" && String(current.status).toUpperCase() !== "CHECKED_IN") await assertWithinStay(current);
 
         const patch: Record<string, unknown> = {
           status: nextStatus,
@@ -961,7 +982,7 @@ export class BookingService {
       }
 
       // Reception's own requirements come from Settings; guests checking in online always give everything.
-      const rules = isPrivileged ? await configService.getCheckinRules() : DEFAULT_CHECKIN_RULES;
+      const rules = isPrivileged ? await configService.getCheckinRules(typeof booking.outlet_id === "string" ? booking.outlet_id : null) : DEFAULT_CHECKIN_RULES;
       const mustHave = (required: boolean) => !isPrivileged || required;
 
       const mappedGuests = incomingGuests.map(
@@ -1178,7 +1199,7 @@ export class BookingService {
           .filter((room) => room.id);
       }
 
-      if (markAsCheckedIn) assertWithinStay(booking);
+      if (markAsCheckedIn) await assertWithinStay(booking);
 
       if (markAsCheckedIn && mustHave(rules.room) && assignedRooms.length === 0) {
         throw new HttpError(
@@ -1623,8 +1644,15 @@ export class BookingService {
     const grandTotal = gst.total;
 
     if (checkout) {
-      if (String(booking.status).toUpperCase() !== "CHECKED_IN") {
-        throw new HttpError(409, "Only a checked-in booking can be checked out.");
+      const current = String(booking.status).toUpperCase();
+      if (current !== "CHECKED_IN") {
+        // Reception missed the check-in: once the stay is over (check-out day and time passed) it can be closed directly.
+        const phase = current === "CONFIRMED" || current === "PENDING"
+          ? stayPhase(booking.check_in_date as any, booking.check_out_date as any, await outletStayTimes(booking.outlet_id))
+          : null;
+        if (phase !== "over") {
+          throw new HttpError(409, "Only a checked-in booking, or a confirmed one whose check-out time has passed, can be checked out.");
+        }
       }
       const paid = Math.round(payments.reduce((sum, entry) => sum + entry.amount, 0) * 100) / 100;
       if (Math.abs(paid - grandTotal) > 0.009) {

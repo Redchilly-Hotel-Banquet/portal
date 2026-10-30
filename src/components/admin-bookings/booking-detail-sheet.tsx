@@ -13,6 +13,7 @@ import { StayMessages } from "./stay-messages";
 import { ExtendStayDialog } from "./extend-stay-dialog";
 import { RoomLines } from "./room-lines";
 import { CheckoutDialog } from "./checkout-dialog";
+import { formatClock, resolveStayTimes, stayPhase, stayWindow } from "@/lib/stay-times";
 import type { PaymentLine } from "@/lib/payment-modes";
 import { PhoneOrderDialog } from "@/components/admin-orders/phone-order-dialog";
 import { BOOKING_STATUSES, type BillingSummary, type Booking, type WelcomeInfo } from "./types";
@@ -28,6 +29,9 @@ type Props = {
   onManageCheckin: (booking: Booking) => void;
   onOpenInvoice: (summary: BillingSummary) => void;
 };
+
+const formatStayMoment = (instant: number): string =>
+  new Date(instant).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "numeric", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" });
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -78,6 +82,21 @@ export function BookingDetailSheet({ booking, welcome, roomLevels, onClose, onMa
     }
   };
 
+  const times = resolveStayTimes(booking?.outlet_id ? welcome?.[booking.outlet_id] : undefined);
+  const phase = booking ? stayPhase(booking.check_in_date, booking.check_out_date, times) : null;
+  const window = booking ? stayWindow(booking.check_in_date, booking.check_out_date, times) : null;
+  const unconfirmed = booking?.status === "CONFIRMED" || booking?.status === "PENDING";
+  /** Check-in was never marked and the stay is over: reception closes the booking as Cancelled or Checked out. */
+  const missedCheckin = unconfirmed && phase === "over";
+  const stayHint =
+    !unconfirmed || !window
+      ? null
+      : phase === "upcoming"
+        ? `Check-in opens ${formatStayMoment(window.opensAt)}.`
+        : phase === "over"
+          ? `The stay ended ${formatStayMoment(window.endsAt)} and the guest was never checked in. Mark it Cancelled, or Check out if they stayed.`
+          : `Check-in is open until ${formatStayMoment(window.endsAt)}.`;
+
   return (
     <>
       <Sheet open={booking !== null} onOpenChange={(open) => !open && onClose()}>
@@ -100,7 +119,7 @@ export function BookingDetailSheet({ booking, welcome, roomLevels, onClose, onMa
                   </SelectTrigger>
                   <SelectContent>
                     {BOOKING_STATUSES.filter((option) => option.value !== "CHECKED_OUT" || booking.status === "CHECKED_OUT").map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
+                      <SelectItem key={option.value} value={option.value} disabled={option.value === "CHECKED_IN" && booking.status !== "CHECKED_IN" && phase !== null && phase !== "open"}>
                         {option.label}
                       </SelectItem>
                     ))}
@@ -126,13 +145,19 @@ export function BookingDetailSheet({ booking, welcome, roomLevels, onClose, onMa
                     Add food order
                   </Button>
                 ) : null}
-                {booking.status === "CHECKED_IN" ? (
+                {booking.status === "CHECKED_IN" || missedCheckin ? (
                   <Button onClick={() => setConfirmCheckout(true)}>
                     <LogOut className="mr-2 h-4 w-4" strokeWidth={1.75} aria-hidden />
                     Check out
                   </Button>
                 ) : null}
               </div>
+
+              {stayHint ? (
+                <p className="border-t px-6 py-3 text-xs text-muted-foreground" role="status">
+                  {stayHint}
+                </p>
+              ) : null}
 
               <Section title="Guest">
                 <dl className="grid gap-3 sm:grid-cols-2">
@@ -149,8 +174,8 @@ export function BookingDetailSheet({ booking, welcome, roomLevels, onClose, onMa
 
               <Section title="Stay">
                 <dl className="grid gap-3 sm:grid-cols-2">
-                  <Detail label="Check-in">{formatDate(booking.check_in_date)}</Detail>
-                  <Detail label="Check-out">{formatDate(booking.check_out_date)}</Detail>
+                  <Detail label="Check-in">{formatDate(booking.check_in_date)} from {formatClock(times.checkin_time)}</Detail>
+                  <Detail label="Check-out">{formatDate(booking.check_out_date)} by {formatClock(times.checkout_time)}</Detail>
                   <Detail label="Nights">{stayNights(booking)}</Detail>
                   <Detail label="Rooms requested">{booking.rooms_requested ?? (booking.room_ids?.length || 1)}</Detail>
                 </dl>

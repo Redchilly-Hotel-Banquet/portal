@@ -5,7 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { apiPost } from "@/lib/apiClient";
-import { DEFAULT_CHECKIN_RULES, normaliseCheckinRules } from "@/lib/checkin-rules";
+import { normaliseCheckinRuleSets, rulesForOutlet } from "@/lib/checkin-rules";
 import { optionalPhoneError } from "@/lib/phone";
 import type { Booking, CheckinContext } from "./types";
 import {
@@ -38,11 +38,12 @@ export function useCheckinManager(booking: Booking | null) {
 
   const rulesQuery = useQuery({
     queryKey: ["checkin-rules"],
-    queryFn: () => apiPost<{ checkin_rules?: unknown }>("/admin/config", { action: "get" }, true),
-    select: (data) => normaliseCheckinRules(data?.checkin_rules),
+    queryFn: () => apiPost<{ checkin_rule_sets?: unknown }>("/admin/config", { action: "get" }, true),
+    select: (data) => normaliseCheckinRuleSets(data?.checkin_rule_sets),
     staleTime: 60_000,
   });
-  const rules = rulesQuery.data ?? DEFAULT_CHECKIN_RULES;
+  // The rules of the booking's own branch.
+  const rules = rulesForOutlet(rulesQuery.data ?? [], context?.booking?.outlet_id);
 
   const hydrate = useCallback((payload: CheckinContext, fallbackStatus?: string) => {
     setContext(payload);

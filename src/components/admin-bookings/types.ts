@@ -89,6 +89,11 @@ export type WelcomeInfo = {
   welcome_message: string;
   /** The branch's WhatsApp wording; empty means the standard message. */
   whatsapp_template?: string;
+  /** The branch's check-in and check-out times, 24-hour HH:mm in India time. */
+  checkin_time?: string;
+  checkout_time?: string;
+  /** The business's own message variables that apply to this branch, by name. */
+  variables?: Record<string, string>;
 };
 
 export type BookingsResponse = { bookings: Booking[]; welcome?: Record<string, WelcomeInfo>; /** Floor of each room, by room id. */ room_levels?: Record<string, string> };

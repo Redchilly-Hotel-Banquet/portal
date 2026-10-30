@@ -21,6 +21,9 @@ export type Branch = {
   invoice_email: string;
   invoice_terms: string;
   whatsapp_template: string;
+  /** "HH:mm"; empty means the default. */
+  checkin_time: string;
+  checkout_time: string;
   sort_order: number | null;
   is_active: boolean;
 };
@@ -50,6 +53,8 @@ export function toBranch(raw: Record<string, unknown>): Branch | null {
     invoice_email: str(raw.invoice_email),
     invoice_terms: str(raw.invoice_terms),
     whatsapp_template: str(raw.whatsapp_template),
+    checkin_time: str(raw.checkin_time),
+    checkout_time: str(raw.checkout_time),
     floors_max: Number.isInteger(raw.floors_max) ? Number(raw.floors_max) : null,
     wifi_floors: Array.isArray(raw.wifi_floors)
       ? (raw.wifi_floors as Record<string, unknown>[]).map((row) => ({ floor: str(row?.floor), wifi_name: str(row?.wifi_name), wifi_password: str(row?.wifi_password) }))

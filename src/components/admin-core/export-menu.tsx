@@ -15,7 +15,7 @@ export function ExportMenu({ kind, from, to, outlets }: Props) {
   const create = useMutation({
     mutationFn: (format: "xlsx" | "pdf" | "csv") => apiPost("/admin/analytics/reports", { action: "create", kind, format, from, to, outlets }, true),
     onSuccess: () => {
-      toast.success("Report started. It will appear under Reports at the bottom of the page when it is ready.");
+      toast.success("Report started. It will appear in the Reports tab when it is ready.");
       void queryClient.invalidateQueries({ queryKey: ["analytics-reports"] });
     },
     onError: (error) => toast.error(error instanceof Error ? error.message : "Could not start the report"),
