@@ -213,6 +213,15 @@ export function SettingsManager() {
                 save.mutate();
               }}
             >
+              <Tabs defaultValue="invoice" className="space-y-6">
+                <TabsList className="h-auto flex-wrap justify-start">
+                  <TabsTrigger value="invoice">Invoice</TabsTrigger>
+                  <TabsTrigger value="times">Check-in and out</TabsTrigger>
+                  <TabsTrigger value="floors">Floors</TabsTrigger>
+                  <TabsTrigger value="wifi">Wi-Fi</TabsTrigger>
+                  <TabsTrigger value="message">WhatsApp message</TabsTrigger>
+                </TabsList>
+              <TabsContent value="invoice" className="mt-0">
               <Section title="Invoice details" description="Printed on every invoice for this branch. Anything left blank falls back to the branch's own name, address and contact.">
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field id="s-legal" label="Business name on invoices">
@@ -239,6 +248,8 @@ export function SettingsManager() {
                 </Field>
               </Section>
 
+              </TabsContent>
+              <TabsContent value="times" className="mt-0">
               <Section title="Check-in and check-out times" description="When a stay at this branch starts and ends each day, in India time. A booking can only be checked in from its check-in day at the check-in time until its check-out day at the check-out time. After that, reception marks it Cancelled or Checked out.">
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field id="s-checkin-time" label="Check-in time">
@@ -251,6 +262,8 @@ export function SettingsManager() {
                 {timeError ? <p role="alert" className="text-xs text-destructive">{timeError}</p> : null}
               </Section>
 
+              </TabsContent>
+              <TabsContent value="floors" className="mt-0">
               <Section title="Floors" description="The floors this branch has. Rooms and the Wi-Fi settings below choose their floor from this list.">
                 <div className="max-w-xs space-y-1.5">
                   <Label htmlFor="s-floors">Highest floor</Label>
@@ -272,6 +285,8 @@ export function SettingsManager() {
                 </div>
               </Section>
 
+              </TabsContent>
+              <TabsContent value="wifi" className="mt-0">
               <Section title="Wi-Fi" description="Sent to guests in the welcome message. A guest gets the Wi-Fi for the floor of their room.">
                 <div className="space-y-3">
                   {form.wifi_floors.map((row, index) => (
@@ -319,6 +334,8 @@ export function SettingsManager() {
                 </div>
               </Section>
 
+              </TabsContent>
+              <TabsContent value="message" className="mt-0">
               <Section title="WhatsApp welcome message" description="What reception sends a guest from the booking, with their check-in ID and Wi-Fi.">
                 <Field id="s-note" label="Welcome note" hint="Added at the end through {note}. For example breakfast timings or the front desk number.">
                   <Textarea id="s-note" rows={3} value={form.welcome_message} onChange={(e) => set("welcome_message", e.target.value)} placeholder="Breakfast 7 to 10 am. Dial 9 for the front desk. Check-out is at 11 am." />
@@ -349,6 +366,8 @@ export function SettingsManager() {
                   </Button>
                 </div>
               </Section>
+              </TabsContent>
+              </Tabs>
 
               <div className="sticky bottom-0 -mx-1 flex justify-end border-t bg-background px-1 py-3">
                 <Button type="submit" disabled={save.isPending}>
