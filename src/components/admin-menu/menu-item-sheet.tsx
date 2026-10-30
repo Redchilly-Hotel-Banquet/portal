@@ -126,24 +126,23 @@ export function MenuItemSheet({
 
   // When adding, the category is chosen by name and each branch uses its own category of that name.
   const creating = !item;
-  const nameOptions = useMemo(
-    () => Array.from(new Set(categoryOptions.map((c) => c.name))).sort((a, b) => a.localeCompare(b)),
-    [categoryOptions],
-  );
+  // Only categories every selected branch has can be used for all of them, so those are the ones offered.
+  const nameOptions = useMemo(() => {
+    const byOutlet = new Map<string, Set<string>>();
+    for (const c of categoryOptions) byOutlet.set(c.outlet, (byOutlet.get(c.outlet) ?? new Set()).add(c.name));
+    const names = Array.from(new Set(categoryOptions.map((c) => c.name)));
+    const chosen = selectedOutlets.length > 0 ? selectedOutlets : outlets;
+    return names.filter((name) => chosen.every((outlet) => byOutlet.get(outlet)?.has(name))).sort((a, b) => a.localeCompare(b));
+  }, [categoryOptions, selectedOutlets, outlets]);
   const categoryByOutlet = (outlet: string) =>
     categoryOptions.find((c) => c.name === form.category && c.outlet === outlet);
-  const missing = useMemo(() => {
-    if (!form.category) return {};
-    return Object.fromEntries(
-      outlets.filter((o) => !categoryOptions.some((c) => c.name === form.category && c.outlet === o)).map((o) => [o, "no such category"]),
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.category, outlets, categoryOptions]);
 
-  const chooseCategoryName = (categoryName: string) => {
-    setForm((f) => ({ ...f, category: categoryName }));
-    setSelectedOutlets(outlets.filter((o) => categoryOptions.some((c) => c.name === categoryName && c.outlet === o)));
-  };
+  // Changing the branches can remove the chosen category from the list; ask for a new one rather than keep a stale pick.
+  useEffect(() => {
+    if (creating && form.category && !nameOptions.includes(form.category)) setForm((f) => ({ ...f, category: "" }));
+  }, [creating, form.category, nameOptions]);
+
+  const chooseCategoryName = (categoryName: string) => setForm((f) => ({ ...f, category: categoryName }));
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm((f) => ({ ...f, [key]: value }));
 
@@ -234,7 +233,7 @@ export function MenuItemSheet({
                 <Label id="mi-cat-label">Category</Label>
                 <Select value={form.category} onValueChange={chooseCategoryName} disabled={categoriesLoading || nameOptions.length === 0}>
                   <SelectTrigger aria-labelledby="mi-cat-label">
-                    <SelectValue placeholder={categoriesLoading ? "Loading" : nameOptions.length === 0 ? "Add a category first" : "Select"} />
+                    <SelectValue placeholder={categoriesLoading ? "Loading" : nameOptions.length === 0 ? (categoryOptions.length === 0 ? "Add a category first" : "No category common to these branches") : "Select"} />
                   </SelectTrigger>
                   <SelectContent>
                     {nameOptions.map((n) => <SelectItem key={n} value={n}>{n}</SelectItem>)}
@@ -243,8 +242,8 @@ export function MenuItemSheet({
               </div>
               <div className="space-y-2">
                 <Label>Branches</Label>
-                <OutletMultiSelect outlets={outlets} selected={selectedOutlets} onChange={setSelectedOutlets} disabled={missing} loading={outlets.length === 0} />
-                <p className="text-xs text-muted-foreground">The item is added to each selected branch under its own category of that name.</p>
+                <OutletMultiSelect outlets={outlets} selected={selectedOutlets} onChange={setSelectedOutlets} loading={outlets.length === 0} />
+                <p className="text-xs text-muted-foreground">The item is added to each selected branch under its own category of that name. Only categories that every selected branch has are listed.</p>
               </div>
             </div>
           ) : (
