@@ -3,6 +3,7 @@ import { HttpError } from "../../httpError";
 import { AuthenticatedUser } from "../../session";
 import { canAccessOutlet, outletFilter } from "../../utils/access";
 import { businessDayStart } from "../../utils/dates";
+import { assignedRoomIds } from "../../utils/roomAssignments";
 
 type AnalyticsBucket = {
   outlet_id: string;
@@ -83,7 +84,19 @@ export class AnalyticsService {
     const result: {
       admin?: Awaited<ReturnType<AnalyticsService["compute"]>>;
       kitchen?: { ordersToday: number; ordersTotal: number; openOrders: number; sales: number; dishesAvailable: number; dishesTotal: number };
-      rooms?: { activeBookings: number; checkedIn: number; awaiting: number; bookingsTotal: number; rooms: number; tables: number };
+      rooms?: {
+        activeBookings: number;
+        confirmed: number;
+        checkedIn: number;
+        bookingsTotal: number;
+        /** Rooms and tables, split by whether they are switched on. */
+        roomsActive: number;
+        roomsInactive: number;
+        tablesActive: number;
+        tablesInactive: number;
+        /** Rooms held by guests who are checked in right now. */
+        roomsOccupied: number;
+      };
     } = {};
 
     if (user.roles.includes("admin")) {
@@ -111,15 +124,33 @@ export class AnalyticsService {
 
     if (user.roles.includes("rooms")) {
       const bookings = db.collection("bookings");
-      const [activeBookings, checkedIn, awaiting, bookingsTotal, rooms, tables] = await Promise.all([
-        bookings.countDocuments({ ...scope, status: { $in: ["CONFIRMED", "CHECKED_IN"] } }),
-        bookings.countDocuments({ ...scope, status: "CHECKED_IN" }),
-        bookings.countDocuments({ ...scope, status: "PENDING" }),
+      const inventory = db.collection("rooms_tables");
+      const roomTypes = { $in: ["ROOM", "HOTEL_ROOM"] };
+      const [confirmed, stayingDocs, bookingsTotal, roomsActive, roomsInactive, tablesActive, tablesInactive] = await Promise.all([
+        // Old records may still say PENDING; they count as confirmed.
+        bookings.countDocuments({ ...scope, status: { $in: ["CONFIRMED", "PENDING"] } }),
+        bookings
+          .find({ ...scope, status: "CHECKED_IN" }, { projection: { room_id: 1, room_ids: 1, rooms_allocated: 1, "checkin_details.assigned_rooms": 1 } })
+          .toArray(),
         bookings.countDocuments(scope),
-        db.collection("rooms_tables").countDocuments({ ...scope, is_active: { $ne: false }, type: { $in: ["ROOM", "HOTEL_ROOM"] } }),
-        db.collection("rooms_tables").countDocuments({ ...scope, is_active: { $ne: false }, type: "TABLE" }),
+        inventory.countDocuments({ ...scope, is_active: { $ne: false }, type: roomTypes }),
+        inventory.countDocuments({ ...scope, is_active: false, type: roomTypes }),
+        inventory.countDocuments({ ...scope, is_active: { $ne: false }, type: "TABLE" }),
+        inventory.countDocuments({ ...scope, is_active: false, type: "TABLE" }),
       ]);
-      result.rooms = { activeBookings, checkedIn, awaiting, bookingsTotal, rooms, tables };
+      const checkedIn = stayingDocs.length;
+      const roomsOccupied = new Set(stayingDocs.flatMap((doc) => assignedRoomIds(doc))).size;
+      result.rooms = {
+        activeBookings: confirmed + checkedIn,
+        confirmed,
+        checkedIn,
+        bookingsTotal,
+        roomsActive,
+        roomsInactive,
+        tablesActive,
+        tablesInactive,
+        roomsOccupied,
+      };
     }
     return result;
   }
@@ -146,7 +177,7 @@ export class AnalyticsService {
     const bookingsCollection = db.collection("bookings");
     const roomsCollection = db.collection("rooms_tables");
 
-    const outlets = (await outletsCollection.find({}).toArray()).filter((outlet: any) => canAccessOutlet(user, outlet.location_key));
+    const outlets = (await outletsCollection.find({}, { projection: { location_key: 1, name: 1 } }).toArray()).filter((outlet: any) => canAccessOutlet(user, outlet.location_key));
     const buckets = new Map<string, AnalyticsBucket>();
 
     const initialiseBucket = (outlet: any) => {
@@ -178,7 +209,9 @@ export class AnalyticsService {
 
     const outletFilter = !user.outlets.includes("all") ? { outlet_id: { $in: user.outlets } } : {};
 
-    const orders = await ordersCollection.find({ ...outletFilter, ...inRange("created_at") }).toArray();
+    const orders = await ordersCollection
+      .find({ ...outletFilter, ...inRange("created_at") }, { projection: { outlet_id: 1, total: 1, subtotal: 1, created_at: 1 } })
+      .toArray();
     orders.forEach((order: any) => {
       const outletId = order.outlet_id ?? "UNKNOWN";
       if (!buckets.has(outletId)) {
@@ -211,7 +244,9 @@ export class AnalyticsService {
     });
 
     const bookingsFilter = !user.outlets.includes("all") ? { outlet_id: { $in: user.outlets } } : {};
-    const bookings = await bookingsCollection.find({ ...bookingsFilter, ...inRange("created_at") }).toArray();
+    const bookings = await bookingsCollection
+      .find({ ...bookingsFilter, ...inRange("created_at") }, { projection: { outlet_id: 1, total_amount: 1 } })
+      .toArray();
     bookings.forEach((booking: any) => {
       const outletId = booking.outlet_id ?? "UNKNOWN";
       if (!buckets.has(outletId)) {
@@ -267,7 +302,7 @@ export class AnalyticsService {
 
     // Payments belong to the period in which they were received, not the period the booking was made.
     const paid = await bookingsCollection
-      .find({ ...bookingsFilter, status: "CHECKED_OUT", payments: { $exists: true, $ne: [] }, ...inRange("paid_at") })
+      .find({ ...bookingsFilter, status: "CHECKED_OUT", payments: { $exists: true, $ne: [] }, ...inRange("paid_at") }, { projection: { outlet_id: 1, payments: 1, "gst.gst": 1 } })
       .toArray();
     paid.forEach((booking: any) => {
       const bucket = bucketFor(booking.outlet_id ?? "UNKNOWN");
@@ -280,7 +315,7 @@ export class AnalyticsService {
     });
 
     const roomsFilter = !user.outlets.includes("all") ? { outlet_id: { $in: user.outlets } } : {};
-    const rooms = await roomsCollection.find({ is_active: { $ne: false }, ...roomsFilter }).toArray();
+    const rooms = await roomsCollection.find({ is_active: { $ne: false }, ...roomsFilter }, { projection: { outlet_id: 1, type: 1 } }).toArray();
     rooms.forEach((room: any) => {
       const outletId = room.outlet_id ?? "UNKNOWN";
       if (!buckets.has(outletId)) {

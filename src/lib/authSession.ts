@@ -58,6 +58,21 @@ export const saveAdminSession = (token: string, user: AdminUser) => {
   writeSafely(local, USER_KEY, serialisedUser);
 };
 
+/**
+ * Another tab changed the signed-in staff account (signed in, switched account, switched back or signed out).
+ * A tab prefers its own session copy, so bring it in line with the shared one.
+ */
+export const syncAdminSessionFromShared = () => {
+  const { session, local } = getStorages();
+  for (const key of [TOKEN_KEY, USER_KEY]) {
+    const shared = readSafely(local, key);
+    if (shared) writeSafely(session, key, shared);
+    else removeSafely(session, key);
+  }
+};
+
+export const ADMIN_STORAGE_KEYS: readonly string[] = [TOKEN_KEY, USER_KEY];
+
 export const clearAdminSession = () => {
   const { session, local } = getStorages();
   removeSafely(session, TOKEN_KEY);

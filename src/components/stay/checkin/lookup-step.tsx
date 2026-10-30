@@ -38,7 +38,7 @@ export function LookupStep({ state, dispatch, errors, loading, onLookup, onConti
           </p>
         ) : (
           <p role="alert" className="border border-warning/40 p-4 text-sm">
-            This booking is still <strong>{statusLabel(booking.status ?? "PENDING").toLowerCase()}</strong>. Online
+            This booking is still <strong>{statusLabel(booking.status ?? "CONFIRMED").toLowerCase()}</strong>. Online
             check-in opens once the front desk confirms it. Please call the hotel if you need it confirmed sooner.
           </p>
         )}

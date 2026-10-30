@@ -22,6 +22,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
+import { MyAccess } from "@/components/admin/my-access";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useQueryClient } from "@tanstack/react-query";
 import { getAdminUser, type AdminUser } from "@/lib/authSession";
@@ -69,7 +70,6 @@ type SidebarProps = {
 
 function SidebarContent({ user, scopes, pathname, onNavigate, onSignOut }: SidebarProps) {
   const items = ADMIN_NAV.filter((item) => hasAdminScope(scopes, item.scopes));
-  const primaryRole = scopes.includes("admin") ? "admin" : scopes[0];
   const outletLabel = user.outlets.includes("all") ? "All branches" : `${user.outlets.length} branch${user.outlets.length === 1 ? "" : "es"}`;
 
   return (
@@ -112,11 +112,12 @@ function SidebarContent({ user, scopes, pathname, onNavigate, onSignOut }: Sideb
           <div className="min-w-0">
             <p className="truncate text-sm font-medium text-foreground">{user.name}</p>
             <p className="truncate text-xs text-muted-foreground">
-              {primaryRole ? ROLE_LABEL[primaryRole] : "Staff"} · {outletLabel}
+              {scopes.length > 0 ? scopes.map((scope) => ROLE_LABEL[scope]).join(", ") : "Staff"} · {outletLabel}
             </p>
           </div>
           <ThemeToggle />
         </div>
+        <MyAccess />
         <Button type="button" variant="outline" size="sm" className="w-full justify-start" onClick={onSignOut}>
           <LogOut className="mr-2 h-4 w-4" strokeWidth={1.75} aria-hidden />
           Sign out

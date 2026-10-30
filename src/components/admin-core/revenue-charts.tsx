@@ -16,6 +16,7 @@ const tooltipStyle = {
     color: "hsl(var(--popover-foreground))",
   },
   labelStyle: { color: "hsl(var(--foreground))", fontWeight: 500 },
+  itemStyle: { color: "hsl(var(--popover-foreground))" },
   cursor: { fill: "hsl(var(--muted))", opacity: 0.6 },
 };
 

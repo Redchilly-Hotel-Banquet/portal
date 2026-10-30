@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { BedDouble, CalendarCheck, Download, IndianRupee, RefreshCw, ShoppingBag, UtensilsCrossed } from "lucide-react";
+import { BedDouble, Camera, CalendarCheck, IndianRupee, RefreshCw, ShoppingBag, UtensilsCrossed } from "lucide-react";
 import { AdminShell } from "@/components/admin/admin-shell";
 import { StatCard } from "@/components/admin/stat-card";
 import { EmptyState } from "@/components/admin/empty-state";
@@ -10,10 +10,12 @@ import { DataToolbar } from "@/components/admin/data-toolbar";
 import { Money } from "@/components/admin/money";
 import { formatNumber } from "@/components/admin/format";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { apiPost } from "@/lib/apiClient";
+import { getAdminUser } from "@/lib/authSession";
 import {
   ANALYTICS_QUERY_KEY,
   roomRevenue,
@@ -22,20 +24,27 @@ import {
   type OutletAnalytics,
   type SortKey,
 } from "./analytics-types";
-import { ActivityChart, RevenueSplitChart } from "./revenue-charts";
+import { ActivityChart } from "./revenue-charts";
+import { PieBreakdown } from "./chart-parts";
+import { formatINR } from "@/components/admin/format";
+import { BranchFilter } from "./branch-filter";
+import { ExportMenu } from "./export-menu";
+import { defaultRange, type Range } from "./range-picker";
+import { ReportsPanel } from "./reports-panel";
+import { downloadScreenshot } from "@/lib/screenshot";
+import { toast } from "sonner";
+import { GuestsTab } from "./guests-tab";
+import { TrendsTab } from "./trends-tab";
 import { PaymentSources } from "./payment-sources";
 import { PeriodPicker, defaultPeriod, periodLabel, type Period } from "./period-picker";
+
+const TAB_TITLE: Record<string, string> = { branches: "Branch analytics", guests: "Guest analytics", trends: "Trends" };
 
 const SORT_LABEL: Record<SortKey, string> = {
   revenue: "Revenue",
   orders: "Orders",
   bookings: "Bookings",
   name: "Name",
-};
-
-const csvCell = (value: string | number) => {
-  const text = String(value);
-  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 };
 
 function ChartPanel({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
@@ -51,8 +60,29 @@ function ChartPanel({ title, description, children }: { title: string; descripti
 export function AnalyticsView() {
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("revenue");
-  const [branch, setBranch] = useState("all");
+  const [branches, setBranches] = useState<string[]>([]);
   const [period, setPeriod] = useState<Period>(defaultPeriod);
+  const [tab, setTab] = useState("branches");
+  const [guestsRange, setGuestsRange] = useState<Range>(defaultRange);
+  const [trendsRange, setTrendsRange] = useState<Range>(defaultRange);
+  const user = getAdminUser()?.name ?? "";
+  const exportRange = tab === "guests" ? guestsRange : tab === "trends" ? trendsRange : period;
+  const captureRef = useRef<HTMLDivElement>(null);
+  const [capturing, setCapturing] = useState(false);
+
+  const screenshot = async () => {
+    if (!captureRef.current) return;
+    setCapturing(true);
+    try {
+      // The details block is only drawn while capturing; wait for it to be on screen before taking the picture.
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      await downloadScreenshot(captureRef.current, `analytics-${tab}-${new Date().toISOString().slice(0, 10)}.png`);
+    } catch {
+      toast.error("Could not capture the page");
+    } finally {
+      setCapturing(false);
+    }
+  };
 
   const { data: outlets = [], isLoading, isError, isFetching, refetch } = useQuery<OutletAnalytics[]>({
     queryKey: [...ANALYTICS_QUERY_KEY, "period", period.from, period.to],
@@ -65,8 +95,8 @@ export function AnalyticsView() {
   });
 
   const scoped = useMemo(
-    () => (branch === "all" ? outlets : outlets.filter((o) => o.outlet_id === branch)),
-    [outlets, branch],
+    () => (branches.length === 0 ? outlets : outlets.filter((o) => branches.includes(o.outlet_id))),
+    [outlets, branches],
   );
 
   const rows = useMemo(() => {
@@ -86,39 +116,29 @@ export function AnalyticsView() {
     });
   }, [scoped, search, sortKey]);
 
-  const totals = useMemo(() => sumOutlets(scoped), [scoped]);
+  const branchOptions = useMemo(() => outlets.map((o) => ({ id: o.outlet_id, name: o.outlet_name })), [outlets]);
 
-  const exportCsv = () => {
-    const header = [
-      "Branch", "Orders", "Total revenue", "Food revenue", "Room revenue",
-      "Orders today", "Bookings", "Active bookings", "Rooms", "Tables",
-    ];
-    const lines = rows.map((o) =>
-      [
-        o.outlet_name, o.total_orders, toNumber(o.total_revenue), toNumber(o.food_revenue), roomRevenue(o),
-        o.today_orders, o.total_bookings, o.active_bookings, o.total_rooms, o.total_tables,
-      ]
-        .map(csvCell)
-        .join(","),
-    );
-    const blob = new Blob([[header.join(","), ...lines].join("\n")], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `branch-analytics-${period.from}-to-${period.to}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+  const branchSummary = useMemo(() => {
+    const chosen = branches.length === 0 ? branchOptions : branchOptions.filter((o) => branches.includes(o.id));
+    return `${branches.length === 0 ? "All branches" : "Selected"} (${chosen.length}): ${chosen.map((o) => o.name).join(", ") || "none"}`;
+  }, [branches, branchOptions]);
+
+  const totals = useMemo(() => sumOutlets(scoped), [scoped]);
 
   const actions = (
     <>
-      <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
-        <RefreshCw className={`mr-2 h-4 w-4 ${isFetching ? "animate-spin motion-reduce:animate-none" : ""}`} strokeWidth={1.75} aria-hidden />
-        Refresh
-      </Button>
-      <Button variant="outline" size="sm" onClick={exportCsv} disabled={rows.length === 0}>
-        <Download className="mr-2 h-4 w-4" strokeWidth={1.75} aria-hidden />
-        Export CSV
+      {tab === "branches" ? (
+        <>
+          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
+            <RefreshCw className={`mr-2 h-4 w-4 ${isFetching ? "animate-spin motion-reduce:animate-none" : ""}`} strokeWidth={1.75} aria-hidden />
+            Refresh
+          </Button>
+        </>
+      ) : null}
+      <ExportMenu kind={tab as "branches" | "guests" | "trends"} from={exportRange.from} to={exportRange.to} outlets={branches} />
+      <Button variant="outline" size="sm" onClick={() => void screenshot()} disabled={capturing}>
+        <Camera className="mr-2 h-4 w-4" strokeWidth={1.75} aria-hidden />
+        {capturing ? "Capturing" : "Screenshot"}
       </Button>
     </>
   );
@@ -130,6 +150,46 @@ export function AnalyticsView() {
       description={`Revenue, orders and bookings by branch for ${periodLabel(period)}. Refreshes every 30 seconds.`}
       actions={actions}
     >
+      <Tabs value={tab} onValueChange={setTab} className="space-y-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <TabsList>
+            <TabsTrigger value="branches">Branches</TabsTrigger>
+            <TabsTrigger value="guests">Guests</TabsTrigger>
+            <TabsTrigger value="trends">Trends</TabsTrigger>
+          </TabsList>
+          <BranchFilter options={branchOptions} selected={branches} onChange={setBranches} />
+        </div>
+        <ReportsPanel kind={tab as "branches" | "guests" | "trends"} from={exportRange.from} to={exportRange.to} outlets={branches} />
+        <div ref={captureRef} className="space-y-6 bg-background">
+          {capturing ? (
+            <header className="rounded-md border border-border bg-card p-4">
+              <p className="eyebrow">Red Chilly · Analytics</p>
+              <h2 className="mt-1 font-display text-2xl">{TAB_TITLE[tab] ?? "Analytics"}</h2>
+              <dl className="mt-3 grid gap-x-8 gap-y-1 text-sm sm:grid-cols-[auto_1fr]">
+                <dt className="text-muted-foreground">Period</dt>
+                <dd>{periodLabel(exportRange)}</dd>
+                <dt className="text-muted-foreground">Branches</dt>
+                <dd>{branchSummary}</dd>
+                {tab === "branches" && search.trim() ? (
+                  <>
+                    <dt className="text-muted-foreground">Search</dt>
+                    <dd>{search.trim()}</dd>
+                  </>
+                ) : null}
+                {tab === "branches" ? (
+                  <>
+                    <dt className="text-muted-foreground">Sorted by</dt>
+                    <dd>{SORT_LABEL[sortKey]}</dd>
+                  </>
+                ) : null}
+                <dt className="text-muted-foreground">Captured</dt>
+                <dd>{new Date().toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}{user ? ` by ${user}` : ""}</dd>
+              </dl>
+            </header>
+          ) : null}
+        <TabsContent value="guests" className="mt-0"><GuestsTab outlets={branches} range={guestsRange} onRangeChange={setGuestsRange} /></TabsContent>
+        <TabsContent value="trends" className="mt-0"><TrendsTab outlets={branches} range={trendsRange} onRangeChange={setTrendsRange} /></TabsContent>
+        <TabsContent value="branches" className="mt-0">
       <div className="space-y-6">
         <PeriodPicker value={period} onChange={setPeriod} />
         <p className="-mt-3 text-xs text-muted-foreground">
@@ -165,17 +225,6 @@ export function AnalyticsView() {
               searchPlaceholder="Search branch"
               filters={
                 <>
-                  <Select value={branch} onValueChange={setBranch}>
-                    <SelectTrigger className="w-full sm:w-[200px]" aria-label="Branch">
-                      <SelectValue placeholder="Branch" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All branches</SelectItem>
-                      {outlets.map((o) => (
-                        <SelectItem key={o.outlet_id} value={o.outlet_id}>{o.outlet_name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
                   <Select value={sortKey} onValueChange={(v) => setSortKey(v as SortKey)}>
                     <SelectTrigger className="w-full sm:w-[170px]" aria-label="Sort by">
                       <SelectValue placeholder="Sort by" />
@@ -191,12 +240,19 @@ export function AnalyticsView() {
             />
 
             {rows.length === 0 ? (
-              <EmptyState title="No matching branches" description="Adjust the search or branch filter." />
+              <EmptyState title="No matching branches" description="Adjust the search or the branch filter." />
             ) : (
               <>
                 <div className="grid gap-6 xl:grid-cols-2">
-                  <ChartPanel title="Revenue by source" description="Food and beverage against room bookings, per branch.">
-                    <RevenueSplitChart outlets={rows} />
+                  <ChartPanel title="Revenue by source" description="Food and beverage against room bookings, for the branches shown.">
+                    <PieBreakdown
+                      label="Pie chart of food and room revenue"
+                      format={formatINR}
+                      slices={[
+                        { name: "Food and beverage", value: rows.reduce((sum, o) => sum + toNumber(o.food_revenue), 0) },
+                        { name: "Rooms", value: rows.reduce((sum, o) => sum + roomRevenue(o), 0) },
+                      ]}
+                    />
                   </ChartPanel>
                   <ChartPanel title="Orders and bookings" description="Volume per branch in the chosen period.">
                     <ActivityChart outlets={rows} />
@@ -247,6 +303,9 @@ export function AnalyticsView() {
           </>
         )}
       </div>
+        </TabsContent>
+        </div>
+      </Tabs>
     </AdminShell>
   );
 }

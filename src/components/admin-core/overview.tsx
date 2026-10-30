@@ -27,8 +27,28 @@ const DESCRIPTIONS: Record<string, string> = {
 };
 
 type KitchenFigures = { ordersToday: number; ordersTotal: number; openOrders: number; sales: number; dishesAvailable: number; dishesTotal: number };
-type RoomsFigures = { activeBookings: number; checkedIn: number; awaiting: number; bookingsTotal: number; rooms: number; tables: number };
+type RoomsFigures = {
+  activeBookings: number;
+  confirmed: number;
+  checkedIn: number;
+  bookingsTotal: number;
+  roomsActive: number;
+  roomsInactive: number;
+  tablesActive: number;
+  tablesInactive: number;
+  roomsOccupied: number;
+};
 type OverviewResponse = { admin?: { outlets: OutletAnalytics[] }; kitchen?: KitchenFigures; rooms?: RoomsFigures };
+
+/** "6 / 24": the part large, the whole beside it. */
+const Fraction = ({ part, whole }: { part: number; whole: number }) => (
+  <span>
+    {formatNumber(part)}
+    <span className="ml-1 text-xl text-muted-foreground"> / {formatNumber(whole)}</span>
+  </span>
+);
+
+const percent = (part: number, whole: number) => (whole > 0 ? `${Math.round((part / whole) * 100)}%` : "0%");
 
 const Cards = ({ children }: { children: React.ReactNode }) => (
   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">{children}</div>
@@ -39,6 +59,42 @@ const STAFF_DESCRIPTIONS: Record<string, string> = {
   "/admin/menu-items": "Switch dishes on or off for your branch.",
   "/admin/rooms": "Switch rooms and tables on or off for your branch.",
 };
+
+function RoomsCards({ rooms }: { rooms: RoomsFigures }) {
+  const roomsTotal = rooms.roomsActive + rooms.roomsInactive;
+  const tablesTotal = rooms.tablesActive + rooms.tablesInactive;
+  return (
+    <Cards>
+      <StatCard
+        label="Rooms occupied"
+        value={<Fraction part={rooms.roomsOccupied} whole={rooms.roomsActive} />}
+        hint={`${percent(rooms.roomsOccupied, rooms.roomsActive)} of active rooms`}
+      />
+      <StatCard label="Checked in now" value={formatNumber(rooms.checkedIn)} hint={`${rooms.checkedIn === 1 ? "booking" : "bookings"} staying`} />
+      <StatCard
+        label="Confirmed bookings"
+        value={<Fraction part={rooms.confirmed} whole={rooms.activeBookings} />}
+        hint="Yet to check in, of active bookings"
+      />
+      <StatCard label="Total bookings" value={formatNumber(rooms.bookingsTotal)} hint={`${formatNumber(rooms.activeBookings)} active`} />
+      <StatCard
+        label="Active inventory"
+        value={<Fraction part={rooms.roomsActive} whole={roomsTotal} />}
+        hint={`rooms switched on${tablesTotal > 0 ? `, tables ${formatNumber(rooms.tablesActive)} of ${formatNumber(tablesTotal)}` : ""}`}
+      />
+      <StatCard
+        label="Inactive inventory"
+        value={<Fraction part={rooms.roomsInactive} whole={roomsTotal} />}
+        hint={`rooms switched off${tablesTotal > 0 ? `, tables ${formatNumber(rooms.tablesInactive)} of ${formatNumber(tablesTotal)}` : ""}`}
+      />
+      <StatCard
+        label="Total inventory"
+        value={formatNumber(roomsTotal)}
+        hint={tablesTotal > 0 ? `rooms, plus ${formatNumber(tablesTotal)} tables` : "rooms"}
+      />
+    </Cards>
+  );
+}
 
 export function Overview() {
   const [scopes, setScopes] = useState<AdminScope[]>([]);
@@ -93,18 +149,21 @@ export function Overview() {
                 {data.kitchen ? (
                   <Cards>
                     <StatCard label="Orders today" value={formatNumber(data.kitchen.ordersToday)} hint={`${formatNumber(data.kitchen.ordersTotal)} in total`} />
-                    <StatCard label="Open orders" value={formatNumber(data.kitchen.openOrders)} hint="Waiting or being prepared" />
+                    <StatCard
+                      label="Open orders"
+                      value={<Fraction part={data.kitchen.openOrders} whole={data.kitchen.ordersToday} />}
+                      hint="Waiting or being prepared, of today's orders"
+                    />
                     <StatCard label="Food sales" value={<Money value={data.kitchen.sales} />} hint="All orders so far" />
-                    <StatCard label="Dishes on the menu" value={formatNumber(data.kitchen.dishesAvailable)} hint={`available of ${formatNumber(data.kitchen.dishesTotal)}`} />
+                    <StatCard
+                      label="Dishes on the menu"
+                      value={<Fraction part={data.kitchen.dishesAvailable} whole={data.kitchen.dishesTotal} />}
+                      hint={`${formatNumber(data.kitchen.dishesTotal - data.kitchen.dishesAvailable)} switched off`}
+                    />
                   </Cards>
                 ) : null}
                 {data.rooms ? (
-                  <Cards>
-                    <StatCard label="Active bookings" value={formatNumber(data.rooms.activeBookings)} hint={`${formatNumber(data.rooms.bookingsTotal)} in total`} />
-                    <StatCard label="Checked in now" value={formatNumber(data.rooms.checkedIn)} hint="Guests staying" />
-                    <StatCard label="Awaiting confirmation" value={formatNumber(data.rooms.awaiting)} hint="Pending bookings" />
-                    <StatCard label="Inventory" value={formatNumber(data.rooms.rooms)} hint={`rooms, plus ${formatNumber(data.rooms.tables)} tables`} />
-                  </Cards>
+                  <RoomsCards rooms={data.rooms} />
                 ) : null}
               </>
             )}

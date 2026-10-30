@@ -17,7 +17,7 @@ const latestEnd = (from: string) => iso(subDays(addMonths(parseISO(from), MAX_PE
 
 export const defaultPeriod = (): Period => {
   const today = new Date();
-  return { from: iso(subDays(today, 29)), to: iso(today) };
+  return { from: iso(today), to: iso(today) };
 };
 
 /** Keeps a period valid: from is not after to, and it never spans more than six months. */

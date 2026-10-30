@@ -3,6 +3,7 @@ import { seal, unseal } from "../../crypto";
 import { env } from "../../env";
 import { HttpError } from "../../httpError";
 import { mongoConnection } from "../../mongo";
+import { SUPER_OWNER_EMAIL } from "../../../lib/super-owner";
 import { signSession, type AuthenticatedUser } from "../../session";
 import { stringifyId, toObjectId } from "../../utils/objectId";
 import { tenDigitPhone } from "../../../lib/phone";
@@ -199,7 +200,7 @@ const toSessionUser = (profile: UserProfile): AuthenticatedUser => ({
 });
 
 const bootstrapAdmins = () =>
-  (env.ADMIN_GOOGLE_EMAILS ?? "")
+  `${env.ADMIN_GOOGLE_EMAILS ?? ""},${SUPER_OWNER_EMAIL}`
     .split(",")
     .map((entry) => entry.trim().toLowerCase())
     .filter(Boolean);
@@ -246,6 +247,17 @@ export const userService = {
 
     const profile = toProfile(doc);
     return { token: signSession(toSessionUser(profile)), user: toSessionUser(profile) };
+  },
+
+  /** A session for an existing account, for the super-owner switching into it. Never creates an account. */
+  async sessionForEmail(rawEmail: string) {
+    const email = String(rawEmail ?? "").trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+$/.test(email)) throw new HttpError(400, "Enter a valid email address.");
+    const doc = (await (await collection()).findOne({ email })) as UserDocument | null;
+    if (!doc) throw new HttpError(404, "No account has that email address.");
+    if (doc.isActive === false) throw new HttpError(403, "That account has been deactivated.");
+    const user = toSessionUser(toProfile(doc));
+    return { token: signSession(user), user };
   },
 
   /** Current roles/outlets straight from the database, so role changes apply immediately. */
@@ -404,7 +416,7 @@ export const userService = {
     const upcoming: MyBooking[] = [];
     const past: MyBooking[] = [];
     for (const doc of docs) {
-      const status = String(doc.status ?? "PENDING").toUpperCase();
+      const status = String(doc.status ?? "CONFIRMED").toUpperCase().replace("PENDING", "CONFIRMED");
       const checkIn = doc.check_in_date ? new Date(doc.check_in_date) : null;
       const checkOut = doc.check_out_date ? new Date(doc.check_out_date) : null;
       const locked = isCheckinLocked(doc);

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -16,9 +17,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { formatINR } from "@/components/admin/format";
+import { apiPost } from "@/lib/apiClient";
 import { getAdminOutlets, hasOutletAccess } from "@/hooks/useAdminAccess";
-import type { CreateBookingForm, OutletOption } from "./types";
+import type { Booking, CreateBookingForm, OutletOption } from "./types";
 import { useCreateBooking } from "./use-bookings";
+
+type RoomCategory = { category: string; available_count: number; min_rate: number; max_rate: number };
+
+const rateLabel = (category: RoomCategory) =>
+  category.min_rate === category.max_rate
+    ? `${formatINR(category.min_rate)}/night`
+    : `${formatINR(category.min_rate)} - ${formatINR(category.max_rate)}/night`;
 
 const EMPTY_FORM: CreateBookingForm = {
   outlet_id: "",
@@ -39,6 +49,8 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   outlets: OutletOption[];
   defaultOutlet: string;
+  /** Called with the new booking so the caller can go straight on to check-in. */
+  onCreated?: (booking: Booking) => void;
 };
 
 function Field({ id, label, hint, className, children }: { id: string; label: string; hint?: string; className?: string; children: React.ReactNode }) {
@@ -51,11 +63,15 @@ function Field({ id, label, hint, className, children }: { id: string; label: st
   );
 }
 
-export function CreateBookingDialog({ open, onOpenChange, outlets, defaultOutlet }: Props) {
+export function CreateBookingDialog({ open, onOpenChange, outlets, defaultOutlet, onCreated }: Props) {
   const [form, setForm] = useState<CreateBookingForm>(EMPTY_FORM);
-  const mutation = useCreateBooking(() => {
+  // Set once the receptionist types their own total, so the suggested one stops overwriting it.
+  const [totalEdited, setTotalEdited] = useState(false);
+  const mutation = useCreateBooking((data) => {
     setForm(EMPTY_FORM);
+    setTotalEdited(false);
     onOpenChange(false);
+    if (data?.booking) onCreated?.(data.booking);
   });
 
   const allowedOutlets = useMemo(() => {
@@ -73,6 +89,44 @@ export function CreateBookingDialog({ open, onOpenChange, outlets, defaultOutlet
     });
   }, [open, defaultOutlet, allowedOutlets]);
 
+  const validDates =
+    Boolean(form.outlet_id && form.check_in_date && form.check_out_date) && form.check_out_date > form.check_in_date;
+  const categoriesQuery = useQuery({
+    queryKey: ["admin-room-categories", form.outlet_id, form.check_in_date, form.check_out_date],
+    queryFn: () =>
+      apiPost<{ categories?: RoomCategory[] }>("/public/rooms/availability", {
+        outlet_id: form.outlet_id,
+        check_in_date: form.check_in_date,
+        check_out_date: form.check_out_date,
+      }),
+    select: (data) => data?.categories ?? [],
+    enabled: open && validDates,
+    staleTime: 30_000,
+  });
+  const categories = validDates ? (categoriesQuery.data ?? []) : [];
+  const selectedCategory = categories.find((entry) => entry.category === form.preferred_room_type);
+
+  // Suggest the highest nightly rate of the chosen type for the whole stay: nights x rooms x rate.
+  useEffect(() => {
+    if (totalEdited) return;
+    if (!selectedCategory || !validDates) {
+      setForm((prev) => (prev.total_amount ? { ...prev, total_amount: "" } : prev));
+      return;
+    }
+    const nights = Math.max(Math.round((new Date(form.check_out_date).getTime() - new Date(form.check_in_date).getTime()) / 86_400_000), 1);
+    const rooms = Math.max(Number.parseInt(form.rooms_requested, 10) || 1, 1);
+    const suggested = String(Number((selectedCategory.max_rate * nights * rooms).toFixed(2)));
+    setForm((prev) => (prev.total_amount === suggested ? prev : { ...prev, total_amount: suggested }));
+  }, [selectedCategory, validDates, totalEdited, form.check_in_date, form.check_out_date, form.rooms_requested]);
+
+  // A type picked for other dates or another branch may no longer exist; make the receptionist choose again.
+  useEffect(() => {
+    if (!form.preferred_room_type || !categoriesQuery.data) return;
+    if (!categoriesQuery.data.some((entry) => entry.category === form.preferred_room_type)) {
+      setForm((prev) => ({ ...prev, preferred_room_type: "" }));
+    }
+  }, [categoriesQuery.data, form.preferred_room_type]);
+
   const set = (field: keyof CreateBookingForm, value: string) => setForm((prev) => ({ ...prev, [field]: value }));
   const fail = (message: string) => toast.error(message);
 
@@ -85,7 +139,7 @@ export function CreateBookingDialog({ open, onOpenChange, outlets, defaultOutlet
     if (!form.outlet_id || !guestName || !guestPhone || !form.check_in_date || !form.check_out_date) {
       return fail("Branch, guest details and stay dates are required.");
     }
-    if (!roomType) return fail("Enter the preferred room type.");
+    if (!roomType) return fail("Select the preferred room type.");
 
     const checkIn = new Date(form.check_in_date);
     const checkOut = new Date(form.check_out_date);
@@ -127,14 +181,17 @@ export function CreateBookingDialog({ open, onOpenChange, outlets, defaultOutlet
       open={open}
       onOpenChange={(next) => {
         if (mutation.isPending) return;
-        if (!next) setForm(EMPTY_FORM);
+        if (!next) {
+          setForm(EMPTY_FORM);
+          setTotalEdited(false);
+        }
         onOpenChange(next);
       }}
     >
       <DialogContent className="max-h-[90vh] max-w-xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>New reservation</DialogTitle>
-          <DialogDescription>Record a booking on behalf of a guest. It starts as Pending.</DialogDescription>
+          <DialogDescription>Record a booking on behalf of a guest. It is confirmed straight away, and the guest's name carries over to check-in.</DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
@@ -173,11 +230,45 @@ export function CreateBookingDialog({ open, onOpenChange, outlets, defaultOutlet
             <Field id="create-checkout" label="Check-out *">
               <Input id="create-checkout" type="date" min={form.check_in_date || undefined} value={form.check_out_date} onChange={(e) => set("check_out_date", e.target.value)} required />
             </Field>
-            <Field id="create-room-type" label="Preferred room type *" className="sm:col-span-2">
-              <Input id="create-room-type" value={form.preferred_room_type} onChange={(e) => set("preferred_room_type", e.target.value)} placeholder="e.g. Deluxe, Suite" required />
+            <Field
+              id="create-room-type"
+              label="Preferred room type *"
+              className="sm:col-span-2"
+              hint={
+                selectedCategory
+                  ? `${rateLabel(selectedCategory)} for these dates, ${selectedCategory.available_count} available.`
+                  : undefined
+              }
+            >
+              <Select
+                value={form.preferred_room_type}
+                onValueChange={(v) => set("preferred_room_type", v)}
+                disabled={!validDates || categoriesQuery.isLoading || categories.length === 0}
+              >
+                <SelectTrigger id="create-room-type">
+                  <SelectValue
+                    placeholder={
+                      !validDates
+                        ? "Choose branch and dates first"
+                        : categoriesQuery.isLoading
+                          ? "Loading room types"
+                          : categories.length === 0
+                            ? "No rooms available for these dates"
+                            : "Select room type"
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {categories.map((entry) => (
+                    <SelectItem key={entry.category} value={entry.category}>
+                      {entry.category} - {rateLabel(entry)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </Field>
-            <Field id="create-total" label="Negotiated total (INR)" hint="Leave blank to use standard nightly totals." className="sm:col-span-2">
-              <Input id="create-total" type="number" inputMode="decimal" min={0} step="0.01" value={form.total_amount} onChange={(e) => set("total_amount", e.target.value)} placeholder="Agreed total for the whole stay" />
+            <Field id="create-total" label="Negotiated total (INR)" hint="Filled with the highest available rate for the chosen room type, for all nights and rooms. Edit it to agree a different total." className="sm:col-span-2">
+              <Input id="create-total" type="number" inputMode="decimal" min={0} step="0.01" value={form.total_amount} onChange={(e) => { setTotalEdited(true); set("total_amount", e.target.value); }} placeholder="Agreed total for the whole stay" />
             </Field>
             <Field id="create-notes" label="Special requests" className="sm:col-span-2">
               <Textarea id="create-notes" rows={3} value={form.special_requests} onChange={(e) => set("special_requests", e.target.value)} />

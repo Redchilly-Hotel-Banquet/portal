@@ -108,7 +108,7 @@ export function BookingsConsole() {
       />
       <CheckinDialog booking={checkinTarget} onClose={() => setCheckinTarget(null)} />
       <InvoiceDialog summary={invoice} open={invoice !== null} onOpenChange={(open) => !open && setInvoice(null)} />
-      <CreateBookingDialog open={createOpen} onOpenChange={setCreateOpen} outlets={outlets} defaultOutlet={filters.outlet} />
+      <CreateBookingDialog open={createOpen} onOpenChange={setCreateOpen} outlets={outlets} defaultOutlet={filters.outlet} onCreated={setCheckinTarget} />
     </AdminShell>
   );
 }

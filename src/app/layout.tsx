@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Fraunces, Inter } from "next/font/google";
 import { Providers } from "@/components/providers";
+import { SwitchedBanner } from "@/components/switched-banner";
 import "./globals.css";
 
 const sans = Inter({ subsets: ["latin"], variable: "--font-sans", display: "swap" });
@@ -28,6 +29,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" suppressHydrationWarning className={`${sans.variable} ${display.variable}`}>
       <body>
         <Providers>{children}</Providers>
+        <SwitchedBanner />
       </body>
     </html>
   );

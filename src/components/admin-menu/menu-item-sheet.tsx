@@ -10,6 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { OutletMultiSelect } from "./outlet-multi-select";
 import { compressImage } from "./image";
 import { categoryId, type CategoryRecord, type MenuItemPayload, type MenuItemRecord } from "./types";
 
@@ -70,7 +71,8 @@ type Props = {
   outlets: string[];
   defaultOutlet: string;
   saving: boolean;
-  onSubmit: (payload: MenuItemPayload) => void;
+  /** One payload per branch when creating; exactly one when editing. */
+  onSubmit: (payloads: MenuItemPayload[]) => void;
 };
 
 export function MenuItemSheet({
@@ -87,12 +89,21 @@ export function MenuItemSheet({
   const [form, setForm] = useState<FormState>(() => blank(defaultOutlet));
   const [processing, setProcessing] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [selectedOutlets, setSelectedOutlets] = useState<string[]>([]);
 
   useEffect(() => {
-    if (open) setForm(item ? fromItem(item, categories) : blank(defaultOutlet));
+    if (!open) return;
+    setForm(item ? fromItem(item, categories) : blank(defaultOutlet));
     // Reset only when the sheet opens or targets another item, not when the category list refreshes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, item, defaultOutlet]);
+
+  // Every branch is ticked by default, including ones that finish loading after the sheet opens.
+  const outletsKey = outlets.join("|");
+  useEffect(() => {
+    if (open) setSelectedOutlets(outlets);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, item, outletsKey]);
 
   // Same category name can exist per outlet, so list them as "Category (outlet)".
   const categoryOptions = useMemo(
@@ -111,6 +122,27 @@ export function MenuItemSheet({
   const chooseCategory = (id: string) => {
     const next = categoryOptions.find((c) => c.id === id);
     setForm((f) => ({ ...f, category: id, outlet_id: next?.outlet || (outlets.includes(f.outlet_id) ? f.outlet_id : "") }));
+  };
+
+  // When adding, the category is chosen by name and each branch uses its own category of that name.
+  const creating = !item;
+  const nameOptions = useMemo(
+    () => Array.from(new Set(categoryOptions.map((c) => c.name))).sort((a, b) => a.localeCompare(b)),
+    [categoryOptions],
+  );
+  const categoryByOutlet = (outlet: string) =>
+    categoryOptions.find((c) => c.name === form.category && c.outlet === outlet);
+  const missing = useMemo(() => {
+    if (!form.category) return {};
+    return Object.fromEntries(
+      outlets.filter((o) => !categoryOptions.some((c) => c.name === form.category && c.outlet === o)).map((o) => [o, "no such category"]),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.category, outlets, categoryOptions]);
+
+  const chooseCategoryName = (categoryName: string) => {
+    setForm((f) => ({ ...f, category: categoryName }));
+    setSelectedOutlets(outlets.filter((o) => categoryOptions.some((c) => c.name === categoryName && c.outlet === o)));
   };
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm((f) => ({ ...f, [key]: value }));
@@ -139,22 +171,33 @@ export function MenuItemSheet({
       toast.error("Select a category.");
       return;
     }
-    if (!form.outlet_id) {
-      toast.error("Select an outlet.");
-      return;
-    }
-    onSubmit({
+    const shared = {
       name: form.name.trim(),
       description: form.description.trim(),
       base_price: price,
-      category_id: form.category,
-      category: selected?.name ?? "",
-      outlet_id: form.outlet_id,
       prep_time_minutes: parseInt(form.prep_time_minutes || "0", 10) || 0,
       is_veg: form.is_veg,
       is_available: form.is_available,
       image_url: form.image_url.trim(),
-    });
+    };
+    if (creating) {
+      if (selectedOutlets.length === 0) {
+        toast.error("Select at least one branch.");
+        return;
+      }
+      onSubmit(
+        selectedOutlets.map((outlet) => {
+          const category = categoryByOutlet(outlet);
+          return { ...shared, category_id: category?.id ?? "", category: form.category, outlet_id: outlet };
+        }),
+      );
+      return;
+    }
+    if (!form.outlet_id) {
+      toast.error("Select an outlet.");
+      return;
+    }
+    onSubmit([{ ...shared, category_id: form.category, category: selected?.name ?? "", outlet_id: form.outlet_id }]);
   };
 
   return (
@@ -185,6 +228,26 @@ export function MenuItemSheet({
               <Input id="mi-prep" type="number" inputMode="numeric" min="0" className="tabular-nums" value={form.prep_time_minutes} onChange={(e) => set("prep_time_minutes", e.target.value)} required />
             </div>
           </div>
+          {creating ? (
+            <div className="grid gap-4">
+              <div className="space-y-2">
+                <Label id="mi-cat-label">Category</Label>
+                <Select value={form.category} onValueChange={chooseCategoryName} disabled={categoriesLoading || nameOptions.length === 0}>
+                  <SelectTrigger aria-labelledby="mi-cat-label">
+                    <SelectValue placeholder={categoriesLoading ? "Loading" : nameOptions.length === 0 ? "Add a category first" : "Select"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {nameOptions.map((n) => <SelectItem key={n} value={n}>{n}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Branches</Label>
+                <OutletMultiSelect outlets={outlets} selected={selectedOutlets} onChange={setSelectedOutlets} disabled={missing} loading={outlets.length === 0} />
+                <p className="text-xs text-muted-foreground">The item is added to each selected branch under its own category of that name.</p>
+              </div>
+            </div>
+          ) : (
           <div className="grid gap-4">
             <div className="space-y-2">
               <Label id="mi-cat-label">Category</Label>
@@ -224,6 +287,7 @@ export function MenuItemSheet({
               )}
             </div>
           </div>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="mi-image">Image</Label>

@@ -1,5 +1,6 @@
 import { DOCUMENT_TYPES } from "@/components/stay/checkin/types";
 import { optionalPhoneError, tenDigitPhone } from "@/lib/phone";
+import { DEFAULT_CHECKIN_RULES, type CheckinRules } from "@/lib/checkin-rules";
 import type { CheckinContext, CheckinGuest } from "./types";
 
 export const MAX_ADMIN_GUESTS = 20;
@@ -58,6 +59,7 @@ export const bookedGuestCount = (context: CheckinContext): number =>
 
 export function seedGuests(context: CheckinContext): AdminGuest[] {
   const stored: CheckinGuest[] = context.checkinDetails?.guests ?? [];
+  const bookedName = context.booking?.guest_name?.trim() ?? "";
   const guests: AdminGuest[] = stored.map((guest, index) => ({
     key: nextKey(),
     fullName: guest.full_name ?? "",
@@ -76,34 +78,49 @@ export function seedGuests(context: CheckinContext): AdminGuest[] {
   // Once guests are saved, only they are shown.
   if (stored.length === 0) {
     while (guests.length < bookedGuestCount(context)) {
-      guests.push(guests.length === 0 ? { ...blankGuest(), phone: tenDigitPhone(context.booking?.guest_phone) ?? "" } : blankGuest());
+      guests.push(
+        guests.length === 0
+          ? { ...blankGuest(), fullName: bookedName, phone: tenDigitPhone(context.booking?.guest_phone) ?? "" }
+          : blankGuest(),
+      );
     }
   }
   return guests;
 }
 
-export const hasDetails = (guest: AdminGuest): boolean =>
-  !optionalPhoneError(guest.phone) && Boolean(guest.fullName.trim() && guest.documentType && guest.documentNumber.trim() && guest.imageDataUrl);
+/** Enough to save: a name, and whatever Settings says must be captured. The signature is only needed to finish. */
+export const hasDetails = (guest: AdminGuest, rules: CheckinRules = DEFAULT_CHECKIN_RULES): boolean =>
+  !optionalPhoneError(guest.phone) &&
+  Boolean(guest.fullName.trim()) &&
+  (!rules.document_number || Boolean(guest.documentNumber.trim())) &&
+  (!rules.document_photo || Boolean(guest.imageDataUrl));
 
-export const isGuestComplete = (guest: AdminGuest): boolean => hasDetails(guest) && Boolean(guest.signature);
+export const isGuestComplete = (guest: AdminGuest, rules: CheckinRules = DEFAULT_CHECKIN_RULES): boolean =>
+  hasDetails(guest, rules) && (!rules.signature || Boolean(guest.signature));
 
 export type Completeness = "complete" | "missing-details" | "missing-photo" | "missing-signature";
 
-export function guestStatus(guest: AdminGuest): Completeness {
-  if (!guest.fullName.trim() || !guest.documentNumber.trim()) return "missing-details";
-  if (!guest.imageDataUrl) return "missing-photo";
-  if (!guest.signature) return "missing-signature";
+export function guestStatus(guest: AdminGuest, rules: CheckinRules = DEFAULT_CHECKIN_RULES): Completeness {
+  if (!guest.fullName.trim() || (rules.document_number && !guest.documentNumber.trim())) return "missing-details";
+  if (rules.document_photo && !guest.imageDataUrl) return "missing-photo";
+  if (rules.signature && !guest.signature) return "missing-signature";
   return "complete";
 }
 
+/** What the guest card still needs, in words, for the "need ..." summary. */
+const needsText = (rules: CheckinRules): string =>
+  ["name", rules.document_number ? "ID number" : "", rules.document_photo ? "ID photo" : "", rules.signature ? "signature" : ""].filter(Boolean).join(", ");
+
 /** Short reasons the check-in cannot be marked complete yet; empty when ready. */
-export function completionIssues(guests: AdminGuest[], booked: number, roomCount: number, hasContact = true): string[] {
+export function completionIssues(guests: AdminGuest[], booked: number, roomCount: number, contact: { phone: boolean; email: boolean } = { phone: true, email: true }, rules: CheckinRules = DEFAULT_CHECKIN_RULES): string[] {
   const issues: string[] = [];
   if (guests.length < 1) issues.push("Add at least one guest");
-  const incomplete = guests.filter((guest) => !isGuestComplete(guest)).length;
-  if (incomplete > 0) issues.push(`${incomplete} guest${incomplete === 1 ? "" : "s"} need name, ID number, photo and signature`);
-  if (roomCount === 0) issues.push("Assign at least one room");
-  if (!hasContact) issues.push("Add a phone number or an email");
+  const incomplete = guests.filter((guest) => !isGuestComplete(guest, rules)).length;
+  if (incomplete > 0) issues.push(`${incomplete} guest${incomplete === 1 ? "" : "s"} need ${needsText(rules)}`);
+  if (rules.room && roomCount === 0) issues.push("Assign at least one room");
+  if (rules.contact_phone && !contact.phone) issues.push("Add a phone number");
+  if (rules.contact_email && !contact.email) issues.push("Add an email address");
+  if (rules.contact_either && !contact.phone && !contact.email) issues.push("Add a phone number or an email address");
   return issues;
 }
 

@@ -17,6 +17,9 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getAdminOutlets } from "@/hooks/useAdminAccess";
 import { apiPost } from "@/lib/apiClient";
+import { isSwitched, switchToAccount } from "@/lib/impersonation";
+import { isSuperOwnerEmail } from "@/lib/super-owner";
+import { getUserAccount, type UserAccount } from "@/lib/userSession";
 import { AccountInfoSheet, type InfoTarget } from "./account-info-sheet";
 import { AccessFields, ROLE_OPTIONS, type BranchOption } from "./access-fields";
 
@@ -35,6 +38,41 @@ function useBranches(): BranchOption[] {
   return (query.data?.outlets ?? [])
     .filter((outlet) => outlet.location_key)
     .map((outlet) => ({ location_key: outlet.location_key as string, name: outlet.name || (outlet.location_key as string) }));
+}
+
+/* ------------------------------ Switch account (super-owner) ------------------------------ */
+
+function SwitchTab() {
+  const [email, setEmail] = useState("");
+  const mutation = useMutation({
+    mutationFn: () => apiPost<{ token: string; user: UserAccount }>("/admin/access", { action: "switch_account", email: email.trim() }, true),
+    onSuccess: (data) => {
+      if (!data?.token || !data.user) return toast.error("Could not switch accounts");
+      switchToAccount(data.token, data.user);
+      toast.success(`Signed in as ${data.user.email ?? data.user.name}`);
+      // A full load, so nothing fetched as the previous account stays on screen.
+      window.location.assign(data.user.roles.length > 0 ? "/admin/dashboard" : "/");
+    },
+    onError: (error) => toast.error(messageOf(error, "Could not switch accounts")),
+  });
+
+  return (
+    <form
+      className="max-w-md space-y-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (email.trim()) mutation.mutate();
+      }}
+    >
+      <p className="text-sm text-muted-foreground">
+        Sign in as any existing account by entering its email. You see the site exactly as that person does, and a bar at the bottom lets you switch back.
+      </p>
+      <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" aria-label="Email of the account to switch to" autoComplete="off" />
+      <Button type="submit" disabled={mutation.isPending || !email.trim()}>
+        {mutation.isPending ? "Switching" : "Switch account"}
+      </Button>
+    </form>
+  );
 }
 
 const Summary = ({ roles, outlets, branches }: { roles: string[]; outlets: string[]; branches: BranchOption[] }) => (
@@ -371,6 +409,8 @@ function LoginsTab({ branches }: { branches: BranchOption[] }) {
 export function AccessManager() {
   const branches = useBranches();
   // Only administrators who can see every branch manage access; the server enforces the same.
+  const [superOwner, setSuperOwner] = useState(false);
+  useEffect(() => setSuperOwner(isSuperOwnerEmail(getUserAccount()?.email) && !isSwitched()), []);
   const allBranches = getAdminOutlets().some((key) => key.trim().toLowerCase() === "all");
   return (
     <AdminShell scope="admin" title="Access" description="Who can sign in, what they can do and which branches they can work in.">
@@ -381,9 +421,11 @@ export function AccessManager() {
           <TabsList>
             <TabsTrigger value="accounts">Google accounts</TabsTrigger>
             <TabsTrigger value="logins">Staff logins</TabsTrigger>
+            {superOwner ? <TabsTrigger value="switch">Switch account</TabsTrigger> : null}
           </TabsList>
           <TabsContent value="accounts" className="mt-0"><AccountsTab branches={branches} /></TabsContent>
           <TabsContent value="logins" className="mt-0"><LoginsTab branches={branches} /></TabsContent>
+          {superOwner ? <TabsContent value="switch" className="mt-0"><SwitchTab /></TabsContent> : null}
         </Tabs>
       )}
     </AdminShell>

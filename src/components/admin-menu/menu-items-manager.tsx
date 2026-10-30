@@ -122,8 +122,30 @@ export function MenuItemsManager() {
     setSheetOpen(true);
   };
 
-  const submit = (payload: MenuItemPayload) =>
-    editing ? save.mutate({ action: "update", id: itemId(editing), data: payload }) : save.mutate({ action: "create", data: payload });
+  const createMany = useMutation({
+    mutationFn: async (payloads: MenuItemPayload[]) => {
+      // One at a time so a failure stops cleanly and reports how far it got.
+      let done = 0;
+      try {
+        for (const data of payloads) {
+          await apiPost("/admin/menu-items/manage", { action: "create", data }, true);
+          done += 1;
+        }
+      } catch (e) {
+        throw new Error(`${errorMessage(e, "Could not save the menu item")}${done ? ` (${done} of ${payloads.length} branches saved)` : ""}`);
+      }
+      return done;
+    },
+    onSuccess: (count) => {
+      setSheetOpen(false);
+      toast.success(count === 1 ? "Menu item created" : `Menu item created for ${count} branches`);
+    },
+    onError: (e: unknown) => toast.error(errorMessage(e, "Could not save the menu item")),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: ["admin-menu-items"] }),
+  });
+
+  const submit = (payloads: MenuItemPayload[]) =>
+    editing ? save.mutate({ action: "update", id: itemId(editing), data: payloads[0] }) : createMany.mutate(payloads);
 
   const toggleAvailability = (item: MenuItemRecord, value: boolean) =>
     save.mutate({ action: "update", id: itemId(item), data: { is_available: value } });
@@ -294,7 +316,7 @@ export function MenuItemsManager() {
         categoriesLoading={categoriesQuery.isLoading}
         outlets={outletsLoading ? [] : outlets}
         defaultOutlet={outletFilter !== ALL ? outletFilter : onlyOutlet}
-        saving={save.isPending}
+        saving={save.isPending || createMany.isPending}
         onSubmit={submit}
       />
 

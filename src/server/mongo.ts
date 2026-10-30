@@ -11,7 +11,14 @@ export const mongoConnection = {
   async connect(): Promise<Db> {
     if (cache.db) return cache.db;
     cache.pending ??= (async () => {
-      const client = new MongoClient(env.MONGO_DB_URI, { maxPoolSize: 10 });
+      const client = new MongoClient(env.MONGO_DB_URI, {
+        maxPoolSize: 10,
+        // Keep a connection warm so the first request after a quiet spell does not pay for a new handshake.
+        minPoolSize: 1,
+        maxIdleTimeMS: 5 * 60_000,
+        // Wire compression shrinks the larger lists (bookings, orders) on their way from the database.
+        compressors: ["zlib"],
+      });
       await client.connect();
       cache.client = client;
       cache.db = client.db(env.MONGO_DB_NAME);

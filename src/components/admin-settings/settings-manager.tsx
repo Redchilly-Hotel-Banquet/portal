@@ -10,8 +10,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { ConfigPanel } from "./config-panel";
 import { toBranch, type Branch, type WifiFloorRow } from "@/components/admin-branches/types";
 import { getAdminOutlets, hasOutletAccess } from "@/hooks/useAdminAccess";
 import { apiPost } from "@/lib/apiClient";
@@ -151,7 +153,14 @@ export function SettingsManager() {
   }, [form, branch]);
 
   return (
-    <AdminShell scope="admin" title="Settings" description="Invoice details, GST number, Wi-Fi and the WhatsApp welcome message, for each branch.">
+    <AdminShell scope="admin" title="Settings" description="Branch details and business-wide configuration.">
+      <Tabs defaultValue="branch" className="space-y-6">
+        <TabsList>
+          <TabsTrigger value="branch">Branch details</TabsTrigger>
+          <TabsTrigger value="config">Configuration</TabsTrigger>
+        </TabsList>
+        <TabsContent value="config" className="mt-0"><ConfigPanel /></TabsContent>
+        <TabsContent value="branch" className="mt-0">
       {isLoading ? (
         <Skeleton className="h-64 w-full" />
       ) : isError ? (
@@ -309,6 +318,8 @@ export function SettingsManager() {
           ) : null}
         </div>
       )}
+        </TabsContent>
+      </Tabs>
     </AdminShell>
   );
 }

@@ -182,6 +182,7 @@ export function RoomsInventory({ rooms, outletRefs, outletKeys, loading, error, 
             <table className="w-full min-w-[52rem] text-sm">
               <thead className="sticky top-0 z-10 bg-muted text-left text-xs uppercase tracking-wide text-muted-foreground shadow-[0_1px_0_hsl(var(--border))]">
                 <tr>
+                  <th scope="col" className="w-12 px-4 py-2.5 text-right font-medium">#</th>
                   <th scope="col" className="px-4 py-2.5 font-medium">Number</th>
                   <th scope="col" className="px-4 py-2.5 font-medium">Branch</th>
                   <th scope="col" className="px-4 py-2.5 font-medium">Floor</th>
@@ -193,10 +194,11 @@ export function RoomsInventory({ rooms, outletRefs, outletKeys, loading, error, 
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {rows.map((room) => {
+                {rows.map((room, index) => {
                   const label = `${room.type === "TABLE" ? "table" : "room"} ${room.code}`;
                   return (
                     <tr key={room.id} className="hover:bg-muted/40">
+                      <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">{start + index + 1}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           <span className="font-medium tabular-nums">{room.code}</span>

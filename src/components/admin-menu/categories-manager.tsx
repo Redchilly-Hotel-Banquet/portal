@@ -46,6 +46,28 @@ export function CategoriesManager() {
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not save the category"),
   });
 
+  const createMany = useMutation({
+    mutationFn: async (payloads: CategoryPayload[]) => {
+      // One at a time so a failure stops cleanly and reports how far it got.
+      let done = 0;
+      try {
+        for (const data of payloads) {
+          await apiPost("/admin/categories/manage", { action: "create", data }, true);
+          done += 1;
+        }
+      } catch (e) {
+        throw new Error(`${e instanceof Error ? e.message : "Could not save the category"}${done ? ` (${done} of ${payloads.length} branches saved)` : ""}`);
+      }
+      return done;
+    },
+    onSuccess: (count) => {
+      setSheetOpen(false);
+      toast.success(count === 1 ? "Category created" : `Category created for ${count} branches`);
+    },
+    onError: (e: unknown) => toast.error(e instanceof Error ? e.message : "Could not save the category"),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: ["admin-categories"] }),
+  });
+
   const openNew = () => {
     setEditing(null);
     setSheetOpen(true);
@@ -125,9 +147,9 @@ export function CategoriesManager() {
         outlets={outlets}
         outletsLoading={outletsLoading}
         nextOrder={nextOrder}
-        saving={mutation.isPending}
-        onSubmit={(data) =>
-          editing ? mutation.mutate({ action: "update", id: categoryId(editing), data }) : mutation.mutate({ action: "create", data })
+        saving={mutation.isPending || createMany.isPending}
+        onSubmit={(payloads) =>
+          editing ? mutation.mutate({ action: "update", id: categoryId(editing), data: payloads[0] }) : createMany.mutate(payloads)
         }
       />
 

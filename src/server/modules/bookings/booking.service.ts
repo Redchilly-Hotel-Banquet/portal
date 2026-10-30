@@ -4,7 +4,9 @@ import { AuthenticatedUser } from "../../session";
 import { matchesLastName } from "../../utils/dates";
 import { normalizeDocument } from "../../utils/normalizers";
 import { stringifyId, toObjectId } from "../../utils/objectId";
-import { assignedRoomIds, bookingViewForWindow, currentRoomIds, isCheckinLocked, roomsHeldDuring, staySegments, type StaySegment } from "../../utils/roomAssignments";
+import { configService } from "../config/config.service";
+import { DEFAULT_CHECKIN_RULES } from "../../../lib/checkin-rules";
+import { assignedRoomIds, bookingViewForWindow, currentRoomIds, isCheckinLocked, roomsHeldDuring, staySegments, todayInIndia, type StaySegment } from "../../utils/roomAssignments";
 import { ensureUniqueCheckinId } from "../../utils/checkinId";
 import { reconcileSegments, stayExtension, type ExtendRequest } from "./stay-extension";
 import { assertAdmin, assertOutlet } from "../../utils/access";
@@ -104,9 +106,35 @@ const ORDER_STATUSES_TO_INCLUDE = new Set([
   "ORDER_FINISHED",
 ]);
 
+// Old records may still say PENDING; they count as confirmed (see scripts/confirm-pending-bookings.mjs).
 const ACTIVE_BOOKING_STATUSES = new Set(["PENDING", "CONFIRMED", "CHECKED_IN"]);
+const withoutPending = (status: unknown): string => {
+  const value = typeof status === "string" ? status.trim().toUpperCase() : "";
+  return value === "PENDING" ? "CONFIRMED" : value;
+};
 const MAX_DATA_URL_LENGTH = 10_000_000;
 const DAY_IN_MS = 86_400_000;
+
+const formatStayDay = (value: number): string =>
+  new Date(value).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
+
+/** A guest can only be checked in during the booked stay: from the check-in day up to the day before departure. */
+const assertWithinStay = (booking: object) => {
+  const { check_in_date, check_out_date } = booking as Record<string, unknown>;
+  const from = check_in_date ? new Date(check_in_date as string | number | Date) : null;
+  const to = check_out_date ? new Date(check_out_date as string | number | Date) : null;
+  if (!from || !to || Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return;
+  const today = todayInIndia();
+  const start = Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate());
+  const end = Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), to.getUTCDate());
+  const stay = `${formatStayDay(start)} to ${formatStayDay(end)}`;
+  if (today >= end) {
+    throw new HttpError(409, `This booking was for ${stay} and the stay is over, so it cannot be checked in. Create a new booking for today's stay.`);
+  }
+  if (today < start) {
+    throw new HttpError(409, `This booking is for ${stay}. Check-in opens on ${formatStayDay(start)}.`);
+  }
+};
 
 const toNumber = (value: unknown, fallback = 0): number => {
   if (value === null || value === undefined) return fallback;
@@ -370,6 +398,7 @@ const computeAvailableRooms = async (
 
 const serialiseBookingDetailed = (doc: Record<string, unknown>, includeCheckinId = false) => {
   const clone = { ...doc } as Record<string, unknown>;
+  if (clone.status) clone.status = withoutPending(clone.status);
   if (!includeCheckinId) delete clone.checkin_id;
   const id = stringifyId(clone._id) ?? stringifyId(clone.id);
   if (id) {
@@ -447,6 +476,7 @@ const normaliseBooking = (doc: any, includeCheckinId = false) => {
   if (includeCheckinId && checkin_id) rest.checkin_id = checkin_id;
   const normalised = normalizeDocument(rest);
   if (!normalised) return null;
+  if (normalised.status) normalised.status = withoutPending(normalised.status);
   const primaryRoomId = stringifyId(rest.room_id);
   if (primaryRoomId) normalised.room_id = primaryRoomId;
   if (Array.isArray(normalised.room_ids)) {
@@ -566,7 +596,8 @@ export class BookingService {
         checkin_id: checkinId,
         // Set from the verified session, never from the request body.
         ...(userId ? { user_id: userId } : {}),
-        status: "PENDING",
+        // Bookings are confirmed on creation; there is no separate approval step.
+        status: "CONFIRMED",
         nights,
         rooms_allocated: [],
         checkin_details: null,
@@ -607,19 +638,18 @@ export class BookingService {
           .sort({ created_at: -1 })
           .toArray();
 
-        // One query per collection instead of two per booking: this list is polled every 10 seconds.
-        const lookup = async (collection: any, values: unknown[]) => {
-          const ids = Array.from(new Set(values.filter(Boolean).map((value) => String(value))));
-          if (!ids.length) return new Map<string, any>();
-          const docs = await collection
-            .find({ _id: { $in: ids.flatMap((id) => [id, toObjectId(id)].filter(Boolean)) } })
-            .toArray();
-          return new Map<string, any>(docs.map((doc: any) => [String(doc._id), doc]));
-        };
-        const [roomsById, outletsById] = await Promise.all([
-          lookup(roomsCollection, bookings.map((booking) => booking.room_id)),
-          lookup(outletsCollection, bookings.map((booking) => booking.outlet_id)),
+        // The list is polled every 10 seconds, so its lookups run together and each collection is read once:
+        // the branches serve both the booking rows and the welcome texts, and room floors come with the rooms.
+        const roomIdKeys = (ids: unknown[]) =>
+          Array.from(new Set(ids.filter(Boolean).map((value) => String(value)))).flatMap((id) => [id, toObjectId(id)].filter(Boolean));
+        const heldRoomIds = Array.from(new Set(bookings.flatMap((booking) => assignedRoomIds(booking))));
+        const lookupRoomIds = roomIdKeys([...bookings.map((booking) => booking.room_id), ...heldRoomIds]);
+        const [roomDocs, allOutlets] = await Promise.all([
+          lookupRoomIds.length ? roomsCollection.find({ _id: { $in: lookupRoomIds } } as any).toArray() : Promise.resolve([] as any[]),
+          outletsCollection.find({}).toArray(),
         ]);
+        const roomsById = new Map<string, any>(roomDocs.map((doc: any) => [String(doc._id), doc]));
+        const outletsById = new Map<string, any>(allOutlets.map((doc: any) => [String(doc._id), doc]));
 
         const enriched = bookings.map((booking) => ({
           ...normaliseBooking(booking, true),
@@ -629,7 +659,7 @@ export class BookingService {
 
         // Wi-Fi and welcome text per branch, for the "send to guest" messages. Staff-only: never public.
         const welcome: Record<string, Record<string, unknown>> = {};
-        for (const outlet of await outletsCollection.find({}).toArray()) {
+        for (const outlet of allOutlets) {
           const key = normaliseString((outlet as any).location_key);
           if (!key) continue;
           welcome[key] = {
@@ -643,14 +673,8 @@ export class BookingService {
         }
 
         // Floor of every room a booking holds, so the message can pick that floor's Wi-Fi.
-        const heldRoomIds = Array.from(new Set(bookings.flatMap((booking) => assignedRoomIds(booking))));
-        const levelDocs = heldRoomIds.length
-          ? await roomsCollection
-              .find({ _id: { $in: heldRoomIds.flatMap((id) => [id, toObjectId(id)].filter(Boolean)) } } as any, { projection: { level: 1 } })
-              .toArray()
-          : [];
         const room_levels: Record<string, string> = {};
-        for (const doc of levelDocs) room_levels[String(doc._id)] = normaliseString((doc as any).level);
+        for (const id of heldRoomIds) room_levels[String(id)] = normaliseString(roomsById.get(String(id))?.level);
 
         return { bookings: enriched, welcome, room_levels };
       }
@@ -661,7 +685,7 @@ export class BookingService {
         }
 
         const nextStatus = String(request.status).toUpperCase();
-        if (!["PENDING", "CONFIRMED", "CHECKED_IN", "CANCELLED"].includes(nextStatus)) {
+        if (!["CONFIRMED", "CHECKED_IN", "CANCELLED"].includes(nextStatus)) {
           // Check-out records the payment and finalises the bill, so it only happens through the checkout form.
           throw new HttpError(400, nextStatus === "CHECKED_OUT" ? "Use Check out to finish a stay." : "Invalid status");
         }
@@ -671,6 +695,7 @@ export class BookingService {
         if (String(current.status).toUpperCase() === "CHECKED_OUT") {
           throw new HttpError(409, "A checked-out booking cannot be changed.");
         }
+        if (nextStatus === "CHECKED_IN" && String(current.status).toUpperCase() !== "CHECKED_IN") assertWithinStay(current);
 
         const patch: Record<string, unknown> = {
           status: nextStatus,
@@ -890,7 +915,7 @@ export class BookingService {
 
       if (isPrivileged && user) assertOutlet(user, booking.outlet_id);
 
-      const bookingStatus = normaliseString(booking.status).toUpperCase();
+      const bookingStatus = withoutPending(booking.status);
       const isBookingReady =
         bookingStatus === "CONFIRMED" || bookingStatus === "CHECKED_IN";
       if (!isPrivileged && !isBookingReady) {
@@ -935,6 +960,10 @@ export class BookingService {
         );
       }
 
+      // Reception's own requirements come from Settings; guests checking in online always give everything.
+      const rules = isPrivileged ? await configService.getCheckinRules() : DEFAULT_CHECKIN_RULES;
+      const mustHave = (required: boolean) => !isPrivileged || required;
+
       const mappedGuests = incomingGuests.map(
         (guest: any, index: number) => {
           const existingGuest = previousGuests[index] ?? null;
@@ -949,13 +978,14 @@ export class BookingService {
           if (!fullName) {
             throw new HttpError(400, `Guest ${index + 1}: name is required.`);
           }
-          if (!documentType) {
+          if (!documentType && !isPrivileged) {
             throw new HttpError(
               400,
               `Guest ${index + 1}: document type is required.`,
             );
           }
-          if (!documentNumber) {
+          // Reception may check a guest in without a document number; guests checking in online still give one.
+          if (!documentNumber && mustHave(rules.document_number)) {
             throw new HttpError(
               400,
               `Guest ${index + 1}: document number is required.`,
@@ -981,7 +1011,7 @@ export class BookingService {
               }
             : (existingGuest?.document_image ?? null);
 
-          if (!imagePayload) {
+          if (!imagePayload && mustHave(rules.document_photo)) {
             throw new HttpError(
               400,
               `Guest ${index + 1}: identity document image is required.`,
@@ -1038,10 +1068,10 @@ export class BookingService {
           throw new HttpError(400, "Add at least one guest before checking in.");
         }
         sanitisedGuests.forEach((guest, index) => {
-          if (!guest.document_image) {
+          if (!guest.document_image && mustHave(rules.document_photo)) {
             throw new HttpError(400, `Guest ${index + 1}: attach an identity document before check-in.`);
           }
-          if (!guest.signature_image) {
+          if (!guest.signature_image && mustHave(rules.signature)) {
             throw new HttpError(400, `Guest ${index + 1}: a signature is required before check-in.`);
           }
         });
@@ -1148,7 +1178,9 @@ export class BookingService {
           .filter((room) => room.id);
       }
 
-      if (markAsCheckedIn && assignedRooms.length === 0) {
+      if (markAsCheckedIn) assertWithinStay(booking);
+
+      if (markAsCheckedIn && mustHave(rules.room) && assignedRooms.length === 0) {
         throw new HttpError(
           400,
           "Assign at least one room before marking the booking as checked in.",
@@ -1234,8 +1266,19 @@ export class BookingService {
       const reachablePhone = contactInput.phone !== undefined ? contactPhone : normaliseString(booking.guest_phone) || null;
       const reachableEmail = contactInput.email !== undefined ? contactEmailRaw : normaliseString(booking.guest_email);
       const guestHasPhone = sanitisedGuests.some((guest: any) => Boolean(guest.phone));
-      if ((markAsCheckedIn || !isPrivileged) && !reachablePhone && !reachableEmail && !guestHasPhone) {
-        throw new HttpError(400, "Add a phone number or an email for the guest before checking in.");
+      if (markAsCheckedIn || !isPrivileged) {
+        if (!isPrivileged) {
+          // Guests checking in online: any one way to reach them will do.
+          if (!reachablePhone && !reachableEmail && !guestHasPhone) {
+            throw new HttpError(400, "Add a phone number or an email for the guest before checking in.");
+          }
+        } else {
+          if (rules.contact_phone && !reachablePhone && !guestHasPhone) throw new HttpError(400, "Add a phone number for the guest before checking in.");
+          if (rules.contact_email && !reachableEmail) throw new HttpError(400, "Add an email address for the guest before checking in.");
+          if (rules.contact_either && !reachablePhone && !guestHasPhone && !reachableEmail) {
+            throw new HttpError(400, "Add a phone number or an email address for the guest before checking in.");
+          }
+        }
       }
 
       const updateDoc: Record<string, unknown> = {
@@ -1368,7 +1411,7 @@ export class BookingService {
         throw new HttpError(404, "Booking not found");
       }
 
-      const status = normaliseString(booking.status).toUpperCase();
+      const status = withoutPending(booking.status);
       const isReady = status === "CONFIRMED" || status === "CHECKED_IN";
       if (!isReady) {
         throw new HttpError(

@@ -80,9 +80,28 @@ function Body({ booking }: { booking: Booking }) {
             <Input id="contact-email" type="email" value={manager.contactEmail} onChange={(e) => manager.setContactEmail(e.target.value)} placeholder="name@example.com" autoComplete="off" />
           </div>
         </div>
-        <p className={`text-xs ${manager.hasContact && !manager.contactError ? "text-muted-foreground" : "text-destructive"}`} role={manager.hasContact ? undefined : "alert"}>
-          {manager.contactError ?? (manager.hasContact ? "At least one of phone or email is needed to check in." : "Add a phone number or an email. One of them is needed to check in.")}
-        </p>
+        {(() => {
+          const missing = [
+            manager.rules.contact_phone && !manager.hasPhone ? "a phone number" : "",
+            manager.rules.contact_email && !manager.hasEmail ? "an email address" : "",
+          ].filter(Boolean);
+          if (manager.rules.contact_either && !manager.hasPhone && !manager.hasEmail && missing.length === 0) missing.push("a phone number or an email address");
+          const required = [manager.rules.contact_phone ? "phone number" : "", manager.rules.contact_email ? "email address" : ""].filter(Boolean);
+          if (manager.rules.contact_either && required.length === 0) required.push("phone number or email address");
+          const text =
+            manager.contactError ??
+            (missing.length > 0
+              ? `Add ${missing.join(" and ")}. Needed to check in.`
+              : required.length > 0
+                ? `The ${required.join(" and ")} ${required.length === 1 ? "is" : "are"} needed to check in.`
+                : "Both are optional.");
+          const bad = Boolean(manager.contactError) || missing.length > 0;
+          return (
+            <p className={`text-xs ${bad ? "text-destructive" : "text-muted-foreground"}`} role={bad ? "alert" : undefined}>
+              {text}
+            </p>
+          );
+        })()}
       </Block>
 
       <Block title="Guests">
@@ -92,6 +111,7 @@ function Body({ booking }: { booking: Booking }) {
           onChange={manager.updateGuest}
           onAdd={manager.addGuest}
           onRemove={manager.removeGuest}
+          rules={manager.rules}
         />
       </Block>
 

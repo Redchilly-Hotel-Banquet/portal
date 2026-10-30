@@ -34,7 +34,7 @@ export function CheckinSummary({ booking, details }: { booking: CheckinBooking |
             <div className="flex items-center justify-between gap-4">
               <dt className="text-muted-foreground">Booking</dt>
               <dd>
-                <StatusBadge status={booking.status ?? "PENDING"} />
+                <StatusBadge status={booking.status ?? "CONFIRMED"} />
               </dd>
             </div>
             {details?.status && (

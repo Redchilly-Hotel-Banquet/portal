@@ -110,7 +110,8 @@ export function CheckinFlow() {
 
     const details = saved.data;
     const first = state.guests[0];
-    const guestIsBlank = first && first.savedIndex === null && !first.fullName && !first.documentNumber && !first.imageDataUrl;
+    const bookedName = booking.guest_name?.trim() ?? "";
+    const guestIsBlank = first && first.savedIndex === null && (!first.fullName || first.fullName === bookedName) && !first.documentNumber && !first.imageDataUrl;
     let filled = false;
     const fillSignature = first && !first.signature && details.signatureDataUrl ? details.signatureDataUrl : "";
 
@@ -120,7 +121,7 @@ export function CheckinFlow() {
         type: "updateGuest",
         key: first.key,
         patch: {
-          fullName: profile?.name ?? "",
+          fullName: first.fullName || profile?.name || "",
           documentType: details.documentType || first.documentType,
           documentNumber: details.documentNumber,
           imageDataUrl: details.documentImageDataUrl,

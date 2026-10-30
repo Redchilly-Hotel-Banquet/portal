@@ -1,5 +1,6 @@
+import { PieBreakdown } from "./chart-parts";
 import { Money } from "@/components/admin/money";
-import { formatNumber } from "@/components/admin/format";
+import { formatINR, formatNumber } from "@/components/admin/format";
 import { PAYMENT_MODES, paymentModeLabel } from "@/lib/payment-modes";
 import { toNumber, type OutletAnalytics } from "./analytics-types";
 
@@ -28,7 +29,8 @@ export function PaymentSources({ outlets }: { outlets: OutletAnalytics[] }) {
         <p className="text-sm text-muted-foreground">No payments recorded yet. They appear as guests check out.</p>
       ) : (
         <>
-          <ul className="space-y-3">
+          <PieBreakdown label="Pie chart of payments by source" format={formatINR} slices={modes.map((mode) => ({ name: paymentModeLabel(mode), value: amounts.get(mode) ?? 0 }))} />
+          <ul className="mt-4 space-y-3">
             {modes.map((mode) => {
               const amount = amounts.get(mode) ?? 0;
               const share = total ? (amount / total) * 100 : 0;

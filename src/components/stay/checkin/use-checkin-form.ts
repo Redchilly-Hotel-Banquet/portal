@@ -73,7 +73,8 @@ function prefill(booking: CheckinBooking, details: CheckinDetails | null): Parti
   const count = saved.length > 0 ? Math.min(saved.length, booked) : booked;
   const guests: GuestEntry[] = Array.from({ length: count }, (_, index) => {
     const g = saved[index];
-    if (!g) return index === 0 ? { ...blankGuest(), phone: tenDigitPhone(booking.guest_phone) ?? "" } : blankGuest();
+    // The booker is guest 1: start from the name and phone given when the booking was made.
+    if (!g) return index === 0 ? { ...blankGuest(), fullName: booking.guest_name?.trim() ?? "", phone: tenDigitPhone(booking.guest_phone) ?? "" } : blankGuest();
     const image = g.document_image?.data_url ?? "";
     const signature = g.signature_image?.data_url ?? "";
     return {

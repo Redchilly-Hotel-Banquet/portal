@@ -49,6 +49,17 @@ export const r2 = {
     }
   },
 
+  /** The raw bytes of an object, or null when it is missing. */
+  async getBytes(key: string): Promise<Buffer | null> {
+    try {
+      const res = await client().send(new GetObjectCommand({ Bucket: env.R2_BUCKET, Key: key }));
+      return res.Body ? Buffer.from(await res.Body.transformToByteArray()) : null;
+    } catch (error) {
+      console.error("[r2] could not read", key, error);
+      return null;
+    }
+  },
+
   async remove(key: string) {
     try {
       await client().send(new DeleteObjectCommand({ Bucket: env.R2_BUCKET, Key: key }));

@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { useQuery } from "@tanstack/react-query";
 import { apiPost } from "@/lib/apiClient";
+import { DEFAULT_CHECKIN_RULES, normaliseCheckinRules } from "@/lib/checkin-rules";
 import { optionalPhoneError } from "@/lib/phone";
 import type { Booking, CheckinContext } from "./types";
 import {
@@ -33,6 +35,14 @@ export function useCheckinManager(booking: Booking | null) {
   const [guests, setGuests] = useState<AdminGuest[]>([]);
   const [contactPhone, setContactPhone] = useState("");
   const [contactEmail, setContactEmail] = useState("");
+
+  const rulesQuery = useQuery({
+    queryKey: ["checkin-rules"],
+    queryFn: () => apiPost<{ checkin_rules?: unknown }>("/admin/config", { action: "get" }, true),
+    select: (data) => normaliseCheckinRules(data?.checkin_rules),
+    staleTime: 60_000,
+  });
+  const rules = rulesQuery.data ?? DEFAULT_CHECKIN_RULES;
 
   const hydrate = useCallback((payload: CheckinContext, fallbackStatus?: string) => {
     setContext(payload);
@@ -84,9 +94,10 @@ export function useCheckinManager(booking: Booking | null) {
 
   const booked = context ? bookedGuestCount(context) : booking?.number_of_guests || 1;
   // Someone has to be reachable: the booking contact below, or any guest's own number.
-  const hasContact = Boolean(contactPhone.trim() || contactEmail.trim() || guests.some((guest) => guest.phone.trim()));
+  const hasPhone = Boolean(contactPhone.trim() || guests.some((guest) => guest.phone.trim()));
+  const hasEmail = Boolean(contactEmail.trim());
   const contactError = optionalPhoneError(contactPhone) || (contactEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail.trim()) ? "Enter a valid email address, or leave it blank." : null);
-  const issues = useMemo(() => completionIssues(guests, booked, selectedRooms.length, hasContact), [guests, booked, selectedRooms, hasContact]);
+  const issues = useMemo(() => completionIssues(guests, booked, selectedRooms.length, { phone: hasPhone, email: hasEmail }, rules), [guests, booked, selectedRooms, hasPhone, hasEmail, rules]);
 
   const updateGuest = useCallback((key: string, patch: Partial<AdminGuest>) => {
     setGuests((prev) => prev.map((guest) => (guest.key === key ? { ...guest, ...patch } : guest)));
@@ -107,8 +118,8 @@ export function useCheckinManager(booking: Booking | null) {
   const save = useCallback(async () => {
     if (!booking || !context) return;
     const details = context.checkinDetails;
-    if (!guests.every(hasDetails)) {
-      toast.error("Each guest needs a name, document number and ID photo, and any mobile number must be valid, before saving.");
+    if (!guests.every((guest) => hasDetails(guest, rules))) {
+      toast.error(`Each guest needs a name${rules.document_number ? ", ID number" : ""}${rules.document_photo ? " and ID photo" : ""}, and any mobile number must be valid, before saving.`);
       return;
     }
     if (contactError) {
@@ -145,7 +156,7 @@ export function useCheckinManager(booking: Booking | null) {
 
       const data = await apiPost<CheckinContext>("/admin/bookings/checkin", payload, true);
       if (!data) throw new Error("No response received from server.");
-      hydrate(data, "PENDING");
+      hydrate(data, "CONFIRMED");
       toast.success(markComplete ? "Guest checked in" : "Check-in details saved");
       queryClient.invalidateQueries({ queryKey: BOOKINGS_KEY });
     } catch (err) {
@@ -153,7 +164,7 @@ export function useCheckinManager(booking: Booking | null) {
     } finally {
       setSaving(false);
     }
-  }, [booking, context, contactError, contactEmail, contactPhone, guests, hydrate, issues, markComplete, queryClient, selectedRooms]);
+  }, [booking, context, contactError, contactEmail, contactPhone, guests, hydrate, issues, markComplete, queryClient, rules, selectedRooms]);
 
   return {
     context,
@@ -167,10 +178,12 @@ export function useCheckinManager(booking: Booking | null) {
     guests,
     booked,
     issues,
+    rules,
     contactPhone,
     contactEmail,
     contactError,
-    hasContact,
+    hasPhone,
+    hasEmail,
     setContactPhone,
     setContactEmail,
     updateGuest,

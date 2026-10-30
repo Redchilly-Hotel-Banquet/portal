@@ -70,14 +70,14 @@ export function useUpdateAmount(onDone?: () => void) {
   });
 }
 
-export function useCreateBooking(onDone?: () => void) {
+export function useCreateBooking(onDone?: (data: BookingResponse | undefined) => void) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (payload: Record<string, unknown>) => apiPost<BookingResponse>("/public/bookings", payload),
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: BOOKINGS_KEY });
       toast.success("Reservation recorded");
-      onDone?.();
+      onDone?.(data);
     },
     onError: (error) => toast.error(errorMessage(error, "Unable to create booking")),
   });

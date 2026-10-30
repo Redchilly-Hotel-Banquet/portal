@@ -1,7 +1,6 @@
-export type BookingStatus = "PENDING" | "CONFIRMED" | "CHECKED_IN" | "CHECKED_OUT" | "CANCELLED";
+export type BookingStatus = "CONFIRMED" | "CHECKED_IN" | "CHECKED_OUT" | "CANCELLED";
 
 export const BOOKING_STATUSES: ReadonlyArray<{ value: BookingStatus; label: string }> = [
-  { value: "PENDING", label: "Pending" },
   { value: "CONFIRMED", label: "Confirmed" },
   { value: "CHECKED_IN", label: "Checked in" },
   { value: "CHECKED_OUT", label: "Checked out" },

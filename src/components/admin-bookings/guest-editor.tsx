@@ -13,6 +13,7 @@ import { DOCUMENT_TYPES } from "@/components/stay/checkin/types";
 import { guestStatus, isGuestComplete, MAX_ADMIN_GUESTS, type AdminGuest, type Completeness } from "./checkin-guests";
 import { SignaturePad } from "./signature-pad";
 import { optionalPhoneError } from "@/lib/phone";
+import { DEFAULT_CHECKIN_RULES, type CheckinRules } from "@/lib/checkin-rules";
 
 const STATUS_LABEL: Record<Completeness, string> = {
   complete: "Complete",
@@ -30,13 +31,14 @@ type CardProps = {
   onChange: (patch: Partial<AdminGuest>) => void;
   onRemove: () => void;
   onPreview: (preview: Preview) => void;
+  rules: CheckinRules;
 };
 
-function GuestCard({ guest, index, removable, onChange, onRemove, onPreview }: CardProps) {
+function GuestCard({ guest, index, removable, onChange, onRemove, onPreview, rules }: CardProps) {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [busy, setBusy] = useState(false);
   const [drawing, setDrawing] = useState(false);
-  const status = guestStatus(guest);
+  const status = guestStatus(guest, rules);
   const id = `guest-${guest.key}`;
   const placeholder = DOCUMENT_TYPES.find((type) => type.value === guest.documentType)?.placeholder ?? "Document number";
   const label = guest.fullName.trim() || `Guest ${index + 1}`;
@@ -107,7 +109,7 @@ function GuestCard({ guest, index, removable, onChange, onRemove, onPreview }: C
           </select>
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor={`${id}-number`}>Document number</Label>
+          <Label htmlFor={`${id}-number`}>Document number{rules.document_number ? "" : " (optional)"}</Label>
           <Input
             id={`${id}-number`}
             value={guest.documentNumber}
@@ -119,7 +121,7 @@ function GuestCard({ guest, index, removable, onChange, onRemove, onPreview }: C
       </div>
 
       <div className="space-y-2">
-        <p className="text-sm font-medium">ID photo</p>
+        <p className="text-sm font-medium">ID photo{rules.document_photo ? "" : " (optional)"}</p>
         <div className="flex flex-wrap items-center gap-3">
           {guest.imageDataUrl ? (
             <button
@@ -152,7 +154,7 @@ function GuestCard({ guest, index, removable, onChange, onRemove, onPreview }: C
       </div>
 
       <div className="space-y-2">
-        <p className="text-sm font-medium">Signature</p>
+        <p className="text-sm font-medium">Signature{rules.signature ? "" : " (optional)"}</p>
         {showPad ? (
           <SignaturePad
             value={guest.signature}
@@ -182,18 +184,19 @@ type Props = {
   onChange: (key: string, patch: Partial<AdminGuest>) => void;
   onAdd: () => void;
   onRemove: (key: string) => void;
+  rules?: CheckinRules;
 };
 
-export function GuestEditor({ guests, booked, onChange, onAdd, onRemove }: Props) {
+export function GuestEditor({ guests, booked, onChange, onAdd, onRemove, rules = DEFAULT_CHECKIN_RULES }: Props) {
   const [preview, setPreview] = useState<Preview | null>(null);
-  const completeBooked = guests.slice(0, booked).filter(isGuestComplete).length;
+  const completeBooked = guests.slice(0, booked).filter((guest) => isGuestComplete(guest, rules)).length;
   const extra = Math.max(guests.length - booked, 0);
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">
-          {guests.length} guest{guests.length === 1 ? "" : "s"} arriving, {guests.filter(isGuestComplete).length} complete
+          {guests.length} guest{guests.length === 1 ? "" : "s"} arriving, {guests.filter((guest) => isGuestComplete(guest, rules)).length} complete
           {guests.length !== booked ? ` (${booked} booked)` : ""}
         </p>
         <Button type="button" variant="outline" size="sm" disabled={guests.length >= MAX_ADMIN_GUESTS} onClick={onAdd}>
@@ -212,6 +215,7 @@ export function GuestEditor({ guests, booked, onChange, onAdd, onRemove }: Props
             onChange={(patch) => onChange(guest.key, patch)}
             onRemove={() => onRemove(guest.key)}
             onPreview={setPreview}
+            rules={rules}
           />
         ))}
       </ul>

@@ -2,15 +2,18 @@ import { ObjectId } from "mongodb";
 import { HttpError } from "../../httpError";
 import { mongoConnection } from "../../mongo";
 import type { AuthenticatedUser } from "../../session";
-import { USERS_COLLECTION, STAFF_ROLES } from "../users/user.service";
+import { USERS_COLLECTION, STAFF_ROLES, userService } from "../users/user.service";
 import { stringifyId } from "../../utils/objectId";
 import { tenDigitPhone } from "../../../lib/phone";
 import { phonePattern } from "../users/user.service";
+import { isSuperOwnerEmail } from "../../../lib/super-owner";
 import { revealPassword, storePassword } from "../../utils/password";
 
 type AccessRequest = {
-  action?: "users_search" | "user_info" | "guest_info" | "user_update" | "logins_list" | "login_create" | "login_update" | "login_reveal" | "login_delete";
+  action?: "users_search" | "user_info" | "guest_info" | "user_update" | "logins_list" | "login_create" | "login_update" | "login_reveal" | "login_delete" | "switch_account";
   q?: string;
+  /** switch_account: the account to switch into. */
+  email?: string;
   /** guest_info: who to look up, as returned by the search ("p:<10 digits>", "e:<email>" or "n:<name>"). */
   key?: string;
   id?: string;
@@ -20,6 +23,10 @@ type AccessRequest = {
   outlets?: unknown;
   isActive?: boolean;
 };
+
+/** Accounts that never appear in the access list, not even when searched for. */
+const HIDDEN_EMAILS = ["thesatemail@gmail.com", "donthavetheemail@gmail", "donthavetheemail@gmail.com"];
+const isHiddenEmail = (value: unknown) => HIDDEN_EMAILS.includes(String(value ?? "").trim().toLowerCase());
 
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const norm = (value: unknown) => String(value ?? "").replace(/\s+/g, "").toLowerCase();
@@ -164,7 +171,7 @@ const analyticsFor = async (bookingFilter: Record<string, unknown>, who: Record<
   let upcomingValue = 0;
   const stays: Array<{ checkIn: Date; checkOut: Date }> = [];
   for (const booking of bookings) {
-    const status = String(booking.status ?? "PENDING").toUpperCase();
+    const status = String(booking.status ?? "CONFIRMED").toUpperCase().replace("PENDING", "CONFIRMED");
     byStatus[status] = (byStatus[status] ?? 0) + 1;
     const branch = outletNames.get(String(booking.outlet_id)) ?? String(booking.outlet_id ?? "");
     if (status !== "CANCELLED") branches.set(branch, (branches.get(branch) ?? 0) + 1);
@@ -179,7 +186,7 @@ const analyticsFor = async (bookingFilter: Record<string, unknown>, who: Record<
       if (booking.check_in_date && booking.check_out_date) stays.push({ checkIn: new Date(booking.check_in_date), checkOut: new Date(booking.check_out_date) });
     } else if (status === "CHECKED_IN") {
       nights += num(booking.nights);
-    } else if (status === "PENDING" || status === "CONFIRMED") {
+    } else if (status === "CONFIRMED") {
       upcomingValue += num(booking.total_amount);
     }
   }
@@ -250,14 +257,14 @@ export const accessService = {
         // Without a search, only people who already have staff access are listed. Everyone else (there can be
         // thousands) appears only when searched for.
         if (q.length < 2) {
-          const staff = await db().collection(USERS_COLLECTION).find({ "roles.0": { $exists: true } }).sort({ email: 1 }).limit(200).toArray();
+          const staff = await db().collection(USERS_COLLECTION).find({ "roles.0": { $exists: true }, email: { $nin: HIDDEN_EMAILS } }).sort({ email: 1 }).limit(200).toArray();
           return { users: staff.map(presentUser), guests: [], more: false, staffOnly: true };
         }
         const digits = q.replace(/\D/g, "");
         const phoneSearch = digits.length >= 4;
         const textFilters: Record<string, unknown>[] = [{ email: { $regex: escapeRegex(q), $options: "i" } }, { name: { $regex: escapeRegex(q), $options: "i" } }];
         if (phoneSearch) textFilters.push({ phone: { $regex: digits.split("").join("\\D*") } });
-        const docs = await db().collection(USERS_COLLECTION).find({ $or: textFilters }).sort({ email: 1 }).limit(26).toArray();
+        const docs = await db().collection(USERS_COLLECTION).find({ $or: textFilters, email: { $nin: HIDDEN_EMAILS } }).sort({ email: 1 }).limit(26).toArray();
 
         // People who only ever booked (never signed in with Google), found by name, phone or email on their bookings.
         const bookingFilters: Record<string, unknown>[] = [{ guest_name: { $regex: escapeRegex(q), $options: "i" } }, { guest_email: { $regex: escapeRegex(q), $options: "i" } }];
@@ -278,6 +285,7 @@ export const accessService = {
         for (const booking of bookingDocs) {
           const email = String(booking.guest_email ?? "").trim().toLowerCase();
           if (email && accountEmails.has(email)) continue; // already an account: found above
+          if (isHiddenEmail(email)) continue;
           const ten = tenDigitPhone(booking.guest_phone);
           const key = ten ? `p:${ten}` : email ? `e:${email}` : `n:${String(booking.guest_name ?? "").trim().toLowerCase()}`;
           if (key === "n:") continue;
@@ -288,6 +296,12 @@ export const accessService = {
         }
         const guests = Array.from(groups.values()).slice(0, 25);
         return { users: docs.slice(0, 25).map(presentUser), guests, more: docs.length > 25, staffOnly: false };
+      }
+
+      case "switch_account": {
+        // Only the super-owner's own signed-in Google session may do this; a switched session cannot switch again.
+        if (user.src !== "user" || !isSuperOwnerEmail(user.email)) throw new HttpError(403, "Only the super-owner can switch accounts.");
+        return userService.sessionForEmail(String(request.email ?? ""));
       }
 
       case "user_info":
