@@ -38,7 +38,9 @@ export async function recordVisit(req, res, { key, kind = 'campaign', config = {
     let visitorId = readCookie(req.headers.cookie, COOKIE)
     const returning = Boolean(visitorId)
     if (!/^[0-9a-f-]{36}$/.test(visitorId)) visitorId = randomUUID()
+    // Both cookies in one header value would be invalid; the adapter keeps the last Set-Cookie, so append instead.
     res.setHeader('Set-Cookie', `${COOKIE}=${visitorId}; Path=/; Max-Age=31536000; SameSite=Lax; HttpOnly`)
+    res.appendCookie?.(`rc_cmp=${encodeURIComponent(key)}; Path=/; Max-Age=1800; SameSite=Lax; HttpOnly`)
     const ip = clean(String(req.headers['x-forwarded-for'] || '').split(',')[0], 64)
     const referrer = clean(req.headers.referer || req.headers.referrer, 300)
     // The link's own UTM values apply, and a UTM in the scanned URL (for example from an ad) takes priority.

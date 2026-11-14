@@ -14,6 +14,7 @@ import {
   Menu,
   QrCode,
   ScanLine,
+  Shirt,
   ShoppingBag,
   Settings,
   Store,
@@ -52,9 +53,10 @@ export const ADMIN_NAV: NavItem[] = [
   { label: "Analytics", href: "/admin/analytics", icon: BarChart3, scopes: ["admin"] },
   { label: "QR rewards", href: "/admin/rewards", icon: QrCode, scopes: ["admin"] },
   { label: "Scan reward QR", href: "/admin/loyalty-scan", icon: ScanLine, scopes: ["admin", "loyalty"] },
+  { label: "Laundry", href: "/admin/laundry", icon: Shirt, scopes: ["admin", "laundry"] },
 ];
 
-const ROLE_LABEL: Record<AdminScope, string> = { admin: "Administrator", rooms: "Front desk", kitchen: "Kitchen", loyalty: "Loyalty rewards" };
+const ROLE_LABEL: Record<AdminScope, string> = { admin: "Administrator", rooms: "Front desk", kitchen: "Kitchen", loyalty: "Loyalty rewards", laundry: "Laundry" };
 
 type AdminShellProps = {
   scope: AdminScope | AdminScope[];

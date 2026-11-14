@@ -7,6 +7,7 @@ export const ROLE_OPTIONS = [
   { value: "rooms", label: "Front desk", hint: "Bookings, check-in and check-out, rooms on or off" },
   { value: "kitchen", label: "Kitchen", hint: "Orders, and dishes on or off" },
   { value: "loyalty", label: "Loyalty rewards", hint: "Scan and redeem loyalty reward QR codes" },
+  { value: "laundry", label: "Laundry", hint: "Record laundry sent and received, track what is missing, and settle it" },
 ] as const;
 
 export type BranchOption = { location_key: string; name: string };

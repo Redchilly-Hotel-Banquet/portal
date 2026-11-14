@@ -226,3 +226,12 @@ Set `APP_TURSO_URL` and `APP_TURSO_TOKEN`; the table is created on first use. Wi
 Under Settings → Configuration an administrator chooses which documents guests can give and how many photos each needs
 (**Documents**), and what the printed invoice shows, the paper size and the photo sizes for every branch or chosen ones
 (**Invoice**, with a preview of the printed sheet for any number of guests).
+
+## Laundry
+
+Under **Laundry** in the staff portal (`/admin/laundry`), for administrators and staff given the **Laundry** role in Access:
+
+- **Items and prices** is the list of things that go to the laundry (bed sheet ₹15, pillow cover ₹7, …). Only an administrator edits it.
+- **Give laundry** records a day's batch: how many of each item went out, at that day's prices (a later price change does not alter past records).
+- **Received** is added on each day laundry comes back (it can come back in parts). Whatever has not come back is **missing**, listed per item and day on the **Missing items** tab, and stays listed after the batch is settled (as written off).
+- **Settle** works out what is owed for what came back, with an optional reduction per item and for the total, shown as an adjustment on the settlement (for example 8 sheets and 19 covers received = ₹253, less ₹50 = ₹203 paid).

@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { formatPhone } from "@/lib/phone";
 import { QrImage } from "./qr-image";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { WebsiteAnalytics } from "./site-analytics";
 import { CampaignAnalytics } from "./campaign-analytics";
 import { getAdminUser } from "@/lib/authSession";
 import { apiPost } from "@/lib/apiClient";
@@ -23,7 +24,8 @@ const blankReward = { orderId: "", customerName: "", phone: "", source: "manual"
 const sections: Array<{ key: string; label: string; about: string; screens: Array<[string, string, string]> }> = [
   { key: "links", label: "Campaign links", about: "Links and QR codes you print or post (Instagram, flyers, newspaper). Each one is counted when someone opens it.", screens: [
     ["campaigns", "Your links", "Create and manage links. A link either opens a WhatsApp chat or just records where the visitor came from."],
-    ["analytics", "Results", "How many people opened each link, and where they came from."] ] },
+    ["analytics", "Website visitors", "Everyone who visits the website, from any source: where they came from, what they viewed, and what they clicked."],
+    ["link-results", "QR and link results", "How many people opened each campaign link or QR code, and where they came from."] ] },
   { key: "rewards", label: "Loyalty rewards", about: "Rewards for customers who order. You give a customer a QR code; when they scan it, they get their reward and a visit is added to their phone number.", screens: [
     ["generate", "Give a reward", "Make a QR code for a customer's order."],
     ["records", "Issued QR codes", "QR codes already given out that are waiting to be scanned."],
@@ -129,7 +131,8 @@ export function RewardsManager() {
       {query.isLoading && <p>Loading QR tools…</p>}
       {data && <div className="space-y-5" role="tabpanel">
         {tab === "campaigns" && <Campaigns rows={data.campaigns} busy={busy} run={run} />}
-        {tab === "analytics" && <CampaignAnalytics campaigns={data.campaigns} />}
+        {tab === "analytics" && <WebsiteAnalytics campaigns={data.campaigns} />}
+        {tab === "link-results" && <CampaignAnalytics campaigns={data.campaigns} />}
         {tab === "generate" && <Generator options={data.options} settings={data.settings} busy={busy} run={run} />}
         {tab === "records" && <Records options={data.options} settings={data.settings} busy={busy} run={run} />}
         {tab === "customers" && <Customers busy={busy} run={run} />}

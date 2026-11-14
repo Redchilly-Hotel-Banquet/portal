@@ -10,13 +10,15 @@ import {
   getAdminUser,
 } from "@/lib/authSession";
 
-export type AdminScope = "admin" | "rooms" | "kitchen" | "loyalty";
+export type AdminScope = "admin" | "rooms" | "kitchen" | "loyalty" | "laundry";
 
-const SCOPES: AdminScope[] = ["admin", "rooms", "kitchen", "loyalty"];
+const SCOPES: AdminScope[] = ["admin", "rooms", "kitchen", "loyalty", "laundry"];
 
 /** Where an account lands: the dashboard, or the reward scanner for someone who only has the Loyalty rewards role. */
-export const adminHomePath = (scopes: AdminScope[]): string =>
-  scopes.some((scope) => scope !== "loyalty") || scopes.length === 0 ? "/admin/dashboard" : "/admin/loyalty-scan";
+export const adminHomePath = (scopes: AdminScope[]): string => {
+  if (scopes.length === 0 || scopes.some((scope) => scope === "admin" || scope === "rooms" || scope === "kitchen")) return "/admin/dashboard";
+  return scopes.includes("laundry") ? "/admin/laundry" : "/admin/loyalty-scan";
+};
 
 const normaliseOutletId = (value: unknown): string => {
   if (typeof value !== "string") return "";

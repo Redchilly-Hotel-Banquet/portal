@@ -6,6 +6,7 @@ import { getRewardCollectionName, getRewardCustomerCollectionName, getRewardOpti
 import { createRewardQrRecord, cleanupRewardRecords, getRewardOptionsList, getCustomerRewardStatus } from './services/rewardService.mjs'
 import { CAMPAIGN_COLLECTION } from './config.mjs'
 import { campaignAnalytics } from './tracking.mjs'
+import { siteAnalytics } from './siteTracking.mjs'
 import { getSettings, settingsSchema } from './settings.mjs'
 
 const text = z.string().trim().min(1).max(4000)
@@ -68,6 +69,8 @@ export async function manageQr(body, request, user) {
     }
     case 'campaign_analytics':
       return campaignAnalytics({ key: body.key ? parse(key, body.key) : '', days: parse(z.coerce.number().int().min(1).max(90), body.days || 7) })
+    case 'site_analytics':
+      return siteAnalytics({ days: parse(z.coerce.number().int().min(1).max(90), body.days || 7), campaign: body.campaign ? parse(key, body.campaign) : '' })
     case 'delete_campaign':
       await requireChanged(await campaigns.deleteOne({ key: parse(key, body.key) }))
       return { success: true }

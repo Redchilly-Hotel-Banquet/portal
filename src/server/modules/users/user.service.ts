@@ -17,7 +17,7 @@ import { parseImageDataUrl, r2 } from "../../storage/r2";
  */
 export const USERS_COLLECTION = "portal_users";
 
-export const STAFF_ROLES = ["admin", "kitchen", "rooms", "loyalty"] as const;
+export const STAFF_ROLES = ["admin", "kitchen", "rooms", "loyalty", "laundry"] as const;
 
 type UserDocument = {
   _id: ObjectId;

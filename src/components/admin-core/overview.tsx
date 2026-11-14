@@ -24,6 +24,8 @@ const DESCRIPTIONS: Record<string, string> = {
   "/admin/analytics": "Revenue, orders and bookings by branch.",
   "/admin/settings": "Invoice details, GST number, Wi-Fi and the WhatsApp welcome message for each branch.",
   "/admin/access": "Choose who can sign in, their roles and the branches they work in.",
+  "/admin/laundry": "Record laundry sent out and received back, track missing items and settle the cost.",
+  "/admin/loyalty-scan": "Scan a customer's reward QR to redeem it.",
 };
 
 type KitchenFigures = { ordersToday: number; ordersTotal: number; openOrders: number; sales: number; dishesAvailable: number; dishesTotal: number };

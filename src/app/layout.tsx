@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Fraunces, Inter } from "next/font/google";
 import { Providers } from "@/components/providers";
+import { SiteTracker } from "@/components/site-tracker";
 import { SwitchedBanner } from "@/components/switched-banner";
 import "./globals.css";
 
@@ -30,6 +31,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <Providers>{children}</Providers>
         <SwitchedBanner />
+        <SiteTracker />
       </body>
     </html>
   );

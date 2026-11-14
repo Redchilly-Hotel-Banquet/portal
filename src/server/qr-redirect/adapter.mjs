@@ -28,6 +28,7 @@ export async function adaptHandler(request, handler, configureUrl = () => {}, qr
   let response
   const res = {
     setHeader(name, value) { responseHeaders.set(name, value); return res },
+    appendCookie(value) { responseHeaders.append('Set-Cookie', value); return res },
     status(value) { status = value; return res },
     json(value) {
       responseHeaders.set('Content-Type', 'application/json; charset=utf-8')

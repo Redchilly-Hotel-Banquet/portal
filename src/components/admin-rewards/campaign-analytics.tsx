@@ -7,19 +7,19 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { apiPost } from "@/lib/apiClient";
 
 type Row = Record<string, any>;
-type Slice = { name: string; visits: number; visitors: number };
+export type Slice = { name: string; visits: number; visitors: number };
 
 // Series colours: brand red first, then fixed order. Every use is also labelled in text, so colour is never the only cue.
 const PRIMARY = "hsl(var(--primary))";
 const PALETTE = [PRIMARY, "#3b82a0", "#d9a441", "#7a8f5a", "#8a6bb0"];
-const DAY_CHOICES = [7, 30, 90];
+export const DAY_CHOICES = [7, 30, 90];
 const ALL = "__all__";
 
-const dayKey = (ms: number) => new Date(ms).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+export const dayKey = (ms: number) => new Date(ms).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
 const shortDay = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short" });
-const pct = (part: number, whole: number) => (whole ? Math.round((part / whole) * 100) : 0);
+export const pct = (part: number, whole: number) => (whole ? Math.round((part / whole) * 100) : 0);
 
-function Card({ title, hint, children, className = "" }: { title: string; hint?: string; children: ReactNode; className?: string }) {
+export function Card({ title, hint, children, className = "" }: { title: string; hint?: string; children: ReactNode; className?: string }) {
   return (
     <section className={`rounded-lg border border-border bg-card p-5 ${className}`}>
       <h3 className="font-display text-lg leading-tight">{title}</h3>
@@ -29,7 +29,7 @@ function Card({ title, hint, children, className = "" }: { title: string; hint?:
   );
 }
 
-function Spark({ values }: { values: number[] }) {
+export function Spark({ values }: { values: number[] }) {
   if (values.length < 2) return null;
   const max = Math.max(1, ...values);
   const points = values.map((v, i) => `${(i / (values.length - 1)) * 100},${28 - (v / max) * 26}`).join(" ");
@@ -40,7 +40,7 @@ function Spark({ values }: { values: number[] }) {
   );
 }
 
-function Kpi({ icon, label, value, note, spark }: { icon: ReactNode; label: string; value: ReactNode; note?: string; spark?: number[] }) {
+export function Kpi({ icon, label, value, note, spark }: { icon: ReactNode; label: string; value: ReactNode; note?: string; spark?: number[] }) {
   return (
     <div className="rounded-lg border border-border bg-card p-4">
       <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground"><span className="rounded-md bg-primary/10 p-1.5 text-primary">{icon}</span>{label}</div>
@@ -52,7 +52,7 @@ function Kpi({ icon, label, value, note, spark }: { icon: ReactNode; label: stri
 }
 
 /** Visits (filled area) and unique people (line) per day, with a hover read-out. */
-function TrendChart({ days }: { days: Array<{ date: string; visits: number; visitors: number }> }) {
+export function TrendChart({ days }: { days: Array<{ date: string; visits: number; visitors: number }> }) {
   const [hover, setHover] = useState<number | null>(null);
   const W = 720, H = 220, L = 34, R = 10, T = 12, B = 24;
   const max = Math.max(4, ...days.map(d => d.visits));
@@ -95,7 +95,7 @@ function TrendChart({ days }: { days: Array<{ date: string; visits: number; visi
 }
 
 /** Which hours of the day (India time) people open the links. */
-function HourBars({ hourly }: { hourly: Array<{ hour: number; visits: number }> }) {
+export function HourBars({ hourly }: { hourly: Array<{ hour: number; visits: number }> }) {
   const byHour = new Map(hourly.map(h => [h.hour, h.visits]));
   const values = Array.from({ length: 24 }, (_, h) => byHour.get(h) ?? 0);
   const max = Math.max(1, ...values);
@@ -112,7 +112,7 @@ function HourBars({ hourly }: { hourly: Array<{ hour: number; visits: number }> 
   );
 }
 
-function Ranked({ rows, total, empty = "Nothing recorded yet." }: { rows: Slice[]; total: number; empty?: string }) {
+export function Ranked({ rows, total, empty = "Nothing recorded yet." }: { rows: Slice[]; total: number; empty?: string }) {
   if (rows.length === 0) return <p className="text-sm text-muted-foreground">{empty}</p>;
   const max = Math.max(1, ...rows.map(r => r.visits));
   return (
@@ -128,7 +128,7 @@ function Ranked({ rows, total, empty = "Nothing recorded yet." }: { rows: Slice[
   );
 }
 
-function Donut({ rows, total }: { rows: Slice[]; total: number }) {
+export function Donut({ rows, total }: { rows: Slice[]; total: number }) {
   if (!total) return <p className="text-sm text-muted-foreground">Nothing recorded yet.</p>;
   const R = 40, C = 2 * Math.PI * R;
   let offset = 0;
@@ -143,7 +143,7 @@ function Donut({ rows, total }: { rows: Slice[]; total: number }) {
   );
 }
 
-function Switcher({ value, onChange, options }: { value: string; onChange: (value: any) => void; options: Array<[string, string]> }) {
+export function Switcher({ value, onChange, options }: { value: string; onChange: (value: any) => void; options: Array<[string, string]> }) {
   return <div className="mb-4 flex flex-wrap gap-1 rounded-lg bg-muted p-1" role="tablist">{options.map(([key, label]) => <button key={key} type="button" role="tab" aria-selected={value === key} onClick={() => onChange(key)} className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${value === key ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>{label}</button>)}</div>;
 }
 
