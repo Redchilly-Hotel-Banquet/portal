@@ -1,5 +1,7 @@
 "use client";
 
+import type { DocumentKind } from "@/lib/invoice-settings";
+import { ReceiptText } from "lucide-react";
 import { useState } from "react";
 import { CalendarPlus, DoorOpen, LogOut, Phone, Receipt } from "lucide-react";
 import { formatDate, formatINR } from "@/components/admin/format";
@@ -27,7 +29,7 @@ type Props = {
   roomLevels?: Record<string, string>;
   onClose: () => void;
   onManageCheckin: (booking: Booking) => void;
-  onOpenInvoice: (summary: BillingSummary) => void;
+  onOpenInvoice: (summary: BillingSummary, kind: DocumentKind) => void;
 };
 
 const formatStayMoment = (instant: number): string =>
@@ -55,19 +57,19 @@ export function BookingDetailSheet({ booking, welcome, roomLevels, onClose, onMa
   const [confirmCheckout, setConfirmCheckout] = useState(false);
   const [phoneOrderOpen, setPhoneOrderOpen] = useState(false);
   const [extendOpen, setExtendOpen] = useState(false);
-  const [openingInvoice, setOpeningInvoice] = useState(false);
+  const [openingInvoice, setOpeningInvoice] = useState<DocumentKind | null>(null);
   const billingQuery = useBillingQuery(booking?.id ?? null);
   const statusMutation = useUpdateStatus();
   const checkout = useCheckout();
 
   /** Always reads the bill again, so the invoice reflects food added a moment ago. */
-  const openInvoice = async () => {
-    setOpeningInvoice(true);
+  const openInvoice = async (kind: DocumentKind) => {
+    setOpeningInvoice(kind);
     try {
       const fresh = await billingQuery.refetch();
-      if (fresh.data) onOpenInvoice(fresh.data);
+      if (fresh.data) onOpenInvoice(fresh.data, kind);
     } finally {
-      setOpeningInvoice(false);
+      setOpeningInvoice(null);
     }
   };
 
@@ -129,9 +131,13 @@ export function BookingDetailSheet({ booking, welcome, roomLevels, onClose, onMa
                   <DoorOpen className="mr-2 h-4 w-4" strokeWidth={1.75} aria-hidden />
                   Check-in
                 </Button>
-                <Button variant="outline" onClick={() => void openInvoice()} disabled={!billingQuery.data || openingInvoice}>
+                <Button variant="outline" onClick={() => void openInvoice("invoice")} disabled={!billingQuery.data || openingInvoice !== null}>
                   <Receipt className="mr-2 h-4 w-4" strokeWidth={1.75} aria-hidden />
                   Invoice
+                </Button>
+                <Button variant="outline" onClick={() => void openInvoice("bill")} disabled={!billingQuery.data || openingInvoice !== null}>
+                  <ReceiptText className="mr-2 h-4 w-4" strokeWidth={1.75} aria-hidden />
+                  Bill
                 </Button>
                 {booking.status === "CHECKED_IN" ? (
                   <Button variant="outline" onClick={() => setExtendOpen(true)}>

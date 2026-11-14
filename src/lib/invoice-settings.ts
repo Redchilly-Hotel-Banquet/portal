@@ -14,6 +14,18 @@ export const PAPER_SIZES: Record<PaperSize, { label: string; width: number; heig
 
 /** Each detail the invoice can show. */
 export type InvoiceShow = {
+  amount_payable: boolean;
+  pay_total: boolean;
+  heading_name: boolean;
+  heading_code: boolean;
+  charges: boolean;
+  charge_headings: boolean;
+  room_charges: boolean;
+  room_subtotal: boolean;
+  food_charges: boolean;
+  food_subtotal: boolean;
+  charges_total: boolean;
+  gst_total_row: boolean;
   branch_address: boolean;
   branch_phone: boolean;
   branch_email: boolean;
@@ -120,6 +132,18 @@ export const DEFAULT_INVOICE_SETTINGS: InvoiceSettings = {
   paper: "A4",
   margin_mm: 12,
   show: {
+    amount_payable: true,
+    pay_total: true,
+    heading_name: true,
+    heading_code: true,
+    charges: true,
+    charge_headings: true,
+    room_charges: true,
+    room_subtotal: true,
+    food_charges: true,
+    food_subtotal: true,
+    charges_total: true,
+    gst_total_row: true,
     branch_address: true,
     branch_phone: true,
     branch_email: true,
@@ -201,12 +225,14 @@ export const INVOICE_FIELD_GROUPS: ReadonlyArray<InvoiceSection> = [
     spacer: "after_header",
     all: true,
     fields: [
+      { key: "heading_name", label: "Branch name", hint: "The branch's name at the top left." },
       { key: "branch_address", label: "Branch address", hint: "The invoice address from the branch's settings." },
       { key: "branch_phone", label: "Branch phone", hint: "Shown under the address." },
       { key: "branch_email", label: "Branch email", hint: "Shown under the address." },
       { key: "gstin", label: "GST number", hint: "The branch's GSTIN, when it has one." },
       { key: "folio_status", label: "Status", hint: "The folio's status, for example Checked Out." },
       { key: "issued_date", label: "Date issued", hint: "The day and time the invoice was printed." },
+      { key: "heading_code", label: "Document title and booking code", hint: "The word Bill or Guest folio, with the booking code, at the top right." },
     ],
   },
   {
@@ -252,12 +278,19 @@ export const INVOICE_FIELD_GROUPS: ReadonlyArray<InvoiceSection> = [
   {
     title: "Charges",
     spacer: "after_charges",
+    master: "charges",
     fields: [
+      { key: "charge_headings", label: "Column headings", hint: "Description, Qty, Rate and Amount above the lines." },
       { key: "charge_qty", label: "Quantity column", hint: "Nights or number of items." },
       { key: "charge_rate", label: "Rate column", hint: "The price of one night or one item." },
+      { key: "room_charges", label: "Room charges (A)", hint: "The whole room block: its heading and a line for each room." },
       { key: "room_period", label: "Dates under each room", hint: "The nights a room was used, when the stay moved or was extended." },
+      { key: "room_subtotal", label: "Room charges total", hint: "The total line under the rooms." },
+      { key: "food_charges", label: "Food and beverages (B)", hint: "The whole food block: its heading and every order." },
       { key: "food_items", label: "Each food order", hint: "List every dish. Off shows only the food total." },
       { key: "food_order_heading", label: "Order number and time", hint: "The line above each food order's dishes." },
+      { key: "food_subtotal", label: "Food and beverages total", hint: "The total line under the food." },
+      { key: "charges_total", label: "Total before GST", hint: "The line adding rooms and food together." },
     ],
   },
   {
@@ -270,16 +303,19 @@ export const INVOICE_FIELD_GROUPS: ReadonlyArray<InvoiceSection> = [
       { key: "gst_cgst", label: "CGST column", hint: "Central GST for each charge." },
       { key: "gst_sgst", label: "SGST column", hint: "State GST for each charge." },
       { key: "gst_total", label: "Total GST column", hint: "CGST and SGST together." },
+      { key: "gst_total_row", label: "Total row", hint: "The row adding all the charges up." },
     ],
   },
   {
     title: "Amount payable",
     spacer: "after_payable",
+    master: "amount_payable",
     fields: [
       { key: "pay_before_gst", label: "Total before GST", hint: "The charges before tax." },
       { key: "pay_gst", label: "GST added", hint: "The tax added, with the CGST and SGST split." },
       { key: "pay_round_off", label: "Round off", hint: "Shown only when the total was rounded." },
-      { key: "payments", label: "Payments received", hint: "Each payment taken. The total payable is always shown." },
+      { key: "pay_total", label: "Total payable", hint: "The amount the guest has to pay, with GST." },
+      { key: "payments", label: "Payments received", hint: "Each payment taken." },
       { key: "balance_due", label: "Balance due", hint: "What is still owed after payments." },
     ],
   },
@@ -308,9 +344,9 @@ const clamp = (value: unknown, [min, max]: readonly [number, number], fallback: 
   return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : fallback;
 };
 
-export const normaliseInvoiceSettings = (value: unknown): InvoiceSettings => {
+export const normaliseInvoiceSettings = (value: unknown, defaults: InvoiceSettings = DEFAULT_INVOICE_SETTINGS): InvoiceSettings => {
   const source = (value && typeof value === "object" ? value : {}) as Record<string, any>;
-  const show = { ...DEFAULT_INVOICE_SETTINGS.show };
+  const show = { ...defaults.show };
   // Settings saved when some switches covered several details still mean the same thing.
   const earlier: Record<string, Array<keyof InvoiceShow>> = {
     branch_contact: ["branch_phone", "branch_email"],
@@ -321,10 +357,10 @@ export const normaliseInvoiceSettings = (value: unknown): InvoiceSettings => {
   for (const key of Object.keys(show) as Array<keyof InvoiceShow>) {
     if (typeof source.show?.[key] === "boolean") show[key] = source.show[key];
   }
-  const paper = (Object.keys(PAPER_SIZES) as PaperSize[]).includes(source.paper) ? (source.paper as PaperSize) : DEFAULT_INVOICE_SETTINGS.paper;
+  const paper = (Object.keys(PAPER_SIZES) as PaperSize[]).includes(source.paper) ? (source.paper as PaperSize) : defaults.paper;
   const perRow = Number(source.guests_per_row);
-  const spacers = { ...DEFAULT_INVOICE_SETTINGS.spacers };
-  for (const key of Object.keys(spacers) as SpacerKey[]) spacers[key] = clamp(source.spacers?.[key], [0, MAX_EMPTY_LINES], 0);
+  const spacers = { ...defaults.spacers };
+  for (const key of Object.keys(spacers) as SpacerKey[]) spacers[key] = clamp(source.spacers?.[key], [0, MAX_EMPTY_LINES], defaults.spacers[key]);
   const documents: Record<string, InvoiceDocumentChoice> = {};
   const rawDocuments = (source.documents && typeof source.documents === "object" ? source.documents : {}) as Record<string, any>;
   for (const [type, choice] of Object.entries(rawDocuments).slice(0, 12)) {
@@ -334,28 +370,28 @@ export const normaliseInvoiceSettings = (value: unknown): InvoiceSettings => {
   }
   return {
     spacers,
-    guest_column_gap_mm: clamp(source.guest_column_gap_mm, INVOICE_LIMITS.guest_column_gap_mm, DEFAULT_INVOICE_SETTINGS.guest_column_gap_mm),
-    guest_row_gap_lines: clamp(source.guest_row_gap_lines, INVOICE_LIMITS.guest_row_gap_lines, 0),
-    photo_gap_lines: clamp(source.photo_gap_lines, INVOICE_LIMITS.photo_gap_lines, 0),
+    guest_column_gap_mm: clamp(source.guest_column_gap_mm, INVOICE_LIMITS.guest_column_gap_mm, defaults.guest_column_gap_mm),
+    guest_row_gap_lines: clamp(source.guest_row_gap_lines, INVOICE_LIMITS.guest_row_gap_lines, defaults.guest_row_gap_lines),
+    photo_gap_lines: clamp(source.photo_gap_lines, INVOICE_LIMITS.photo_gap_lines, defaults.photo_gap_lines),
     documents,
     paper,
-    margin_mm: clamp(source.margin_mm, INVOICE_LIMITS.margin_mm, DEFAULT_INVOICE_SETTINGS.margin_mm),
+    margin_mm: clamp(source.margin_mm, INVOICE_LIMITS.margin_mm, defaults.margin_mm),
     show,
-    id_photo_height_mm: clamp(source.id_photo_height_mm, INVOICE_LIMITS.id_photo_height_mm, DEFAULT_INVOICE_SETTINGS.id_photo_height_mm),
-    signature_height_mm: clamp(source.signature_height_mm, INVOICE_LIMITS.signature_height_mm, DEFAULT_INVOICE_SETTINGS.signature_height_mm),
-    guests_per_row: perRow === 1 || perRow === 3 ? perRow : 2,
+    id_photo_height_mm: clamp(source.id_photo_height_mm, INVOICE_LIMITS.id_photo_height_mm, defaults.id_photo_height_mm),
+    signature_height_mm: clamp(source.signature_height_mm, INVOICE_LIMITS.signature_height_mm, defaults.signature_height_mm),
+    guests_per_row: perRow === 1 || perRow === 2 || perRow === 3 ? perRow : defaults.guests_per_row,
   };
 };
 
 /** A set covers every branch (`outlets` empty) or the branches listed; a branch uses its own set, else the every-branch set. */
 export type InvoiceSettingSet = { outlets: string[]; settings: InvoiceSettings };
 
-export const normaliseInvoiceSets = (value: unknown): InvoiceSettingSet[] => {
+export const normaliseInvoiceSets = (value: unknown, defaults: InvoiceSettings = DEFAULT_INVOICE_SETTINGS): InvoiceSettingSet[] => {
   if (!Array.isArray(value)) return [];
   return value.slice(0, 50).map((row) => {
     const source = (row ?? {}) as Record<string, unknown>;
     const outlets = Array.isArray(source.outlets) ? source.outlets.map((o) => (typeof o === "string" ? o.trim() : "")).filter(Boolean) : [];
-    return { outlets: Array.from(new Set(outlets)), settings: normaliseInvoiceSettings(source.settings) };
+    return { outlets: Array.from(new Set(outlets)), settings: normaliseInvoiceSettings(source.settings, defaults) };
   });
 };
 
@@ -372,12 +408,34 @@ export const invoiceSetsError = (sets: InvoiceSettingSet[], knownOutlets?: strin
   return null;
 };
 
-export const invoiceSettingsForOutlet = (sets: InvoiceSettingSet[], outletKey?: string | null): InvoiceSettings =>
+export const invoiceSettingsForOutlet = (sets: InvoiceSettingSet[], outletKey?: string | null, defaults: InvoiceSettings = DEFAULT_INVOICE_SETTINGS): InvoiceSettings =>
   (outletKey ? sets.find((set) => set.outlets.includes(outletKey)) : undefined)?.settings ??
   sets.find((set) => set.outlets.length === 0)?.settings ??
-  DEFAULT_INVOICE_SETTINGS;
+  defaults;
 
 /** Whether a guest's document of this type prints at all, and whether its photo number `side` (0 is the first) does. */
 export const documentPrints = (settings: InvoiceSettings, type: string): boolean => settings.documents[type]?.show !== false;
 export const documentSidePrints = (settings: InvoiceSettings, type: string, side: number): boolean =>
   documentPrints(settings, type) && settings.documents[type]?.sides?.[side] !== false;
+
+/** The two printed documents. The invoice is the full guest folio; the bill is a short summary of what is owed. Each has its own settings. */
+export type DocumentKind = "invoice" | "bill";
+export const DOCUMENT_LABEL: Record<DocumentKind, { name: string; heading: string; title: string }> = {
+  invoice: { name: "Invoice", heading: "Guest folio", title: "Printed invoice" },
+  bill: { name: "Bill", heading: "Bill", title: "Printed bill" },
+};
+
+const off = (keys: Array<keyof InvoiceShow>): Partial<InvoiceShow> => Object.fromEntries(keys.map((key) => [key, false]));
+
+/** A bill starts out short: who it is for, the charges, the total and the balance. Everything else can be switched on. */
+export const DEFAULT_BILL_SETTINGS: InvoiceSettings = {
+  ...DEFAULT_INVOICE_SETTINGS,
+  paper: "A5",
+  margin_mm: 10,
+  show: {
+    ...DEFAULT_INVOICE_SETTINGS.show,
+    ...off(["guest_phone", "guest_email", "branch_name", "guest_count", "booked_on", "checked_in_at", "checked_out_at", "room_details", "col_requested_room", "col_assigned_room", "col_assigned_type", "col_room_status", "room_mismatch_note", "requests", "request_special", "request_arrival", "request_assistance", "request_other", "room_period", "food_order_heading", "gst_breakdown", "gst_basis", "guest_verification", "document_numbers", "id_photos", "signatures"]),
+  } as InvoiceShow,
+};
+
+export const defaultsFor = (kind: DocumentKind): InvoiceSettings => (kind === "bill" ? DEFAULT_BILL_SETTINGS : DEFAULT_INVOICE_SETTINGS);

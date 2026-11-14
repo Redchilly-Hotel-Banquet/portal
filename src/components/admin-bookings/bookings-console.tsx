@@ -1,5 +1,6 @@
 "use client";
 
+import type { DocumentKind } from "@/lib/invoice-settings";
 import { getAdminOutlets, hasOutletAccess } from "@/hooks/useAdminAccess";
 import { useMemo, useState } from "react";
 import { CalendarPlus, RefreshCw } from "lucide-react";
@@ -21,7 +22,7 @@ export function BookingsConsole() {
   const [filters, setFilters] = useState<BookingFilterState>(INITIAL_FILTERS);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [checkinTarget, setCheckinTarget] = useState<Booking | null>(null);
-  const [invoice, setInvoice] = useState<BillingSummary | null>(null);
+  const [invoice, setInvoice] = useState<{ summary: BillingSummary; kind: DocumentKind } | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   // Set while check-in is open straight after creating a reservation: what was entered, so Back can restore it.
   const [draft, setDraft] = useState<{ bookingId: string; form: CreateBookingForm } | null>(null);
@@ -107,7 +108,7 @@ export function BookingsConsole() {
         roomLevels={bookingsQuery.data?.room_levels}
         onClose={() => setSelectedId(null)}
         onManageCheckin={setCheckinTarget}
-        onOpenInvoice={setInvoice}
+        onOpenInvoice={(summary, kind) => setInvoice({ summary, kind })}
       />
       <CheckinDialog
         booking={checkinTarget}
@@ -115,7 +116,7 @@ export function BookingsConsole() {
         backBusy={discard.isPending}
         onBack={draft && checkinTarget?.id === draft.bookingId ? () => discard.mutate(draft.bookingId, { onSuccess: () => { setCheckinTarget(null); setCreateOpen(true); } }) : undefined}
       />
-      <InvoiceDialog summary={invoice} open={invoice !== null} onOpenChange={(open) => !open && setInvoice(null)} />
+      <InvoiceDialog summary={invoice?.summary ?? null} kind={invoice?.kind} open={invoice !== null} onOpenChange={(open) => !open && setInvoice(null)} />
       <CreateBookingDialog open={createOpen} onOpenChange={setCreateOpen} outlets={outlets} defaultOutlet={filters.outlet} initialForm={draft?.form} onCreated={(booking, form) => { setDraft({ bookingId: booking.id, form }); setCheckinTarget(booking); }} />
     </AdminShell>
   );

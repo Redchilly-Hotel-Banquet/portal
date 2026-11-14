@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useDocumentTypes } from "@/hooks/useDocumentTypes";
-import { PAPER_SIZES, type InvoiceSettings } from "@/lib/invoice-settings";
+import { PAPER_SIZES, type DocumentKind, type InvoiceSettings } from "@/lib/invoice-settings";
 import { sampleSummary } from "./invoice-sample";
 
 const PX_PER_MM = 96 / 25.4;
@@ -45,7 +45,7 @@ const paginate = (total: number, printable: number, keepTogether: Array<{ top: n
  * How the invoice prints with these settings: each printed page is shown as its own sheet of the chosen paper, in a
  * list the administrator scrolls through, for a sample stay with the number of guests they pick.
  */
-export function InvoicePreview({ settings, issuer, guests, documentFor }: { settings: InvoiceSettings; issuer: Issuer; guests: number; documentFor: string[] }) {
+export function InvoicePreview({ settings, issuer, guests, documentFor, kind = "invoice" }: { settings: InvoiceSettings; issuer: Issuer; guests: number; documentFor: string[]; kind?: DocumentKind }) {
   const types = useDocumentTypes();
   const paper = PAPER_SIZES[settings.paper];
   const margin = settings.margin_mm;
@@ -95,7 +95,7 @@ export function InvoicePreview({ settings, issuer, guests, documentFor }: { sett
       {/* Measuring copy: laid out at the printable width, never seen. */}
       <div aria-hidden className="invoice-preview pointer-events-none absolute -left-[9999px] top-0 opacity-0" style={{ width: contentW }}>
         <style>{".invoice-preview .invoice-sheet{padding:0 !important}"}</style>
-        <div ref={measure}><InvoiceDocument summary={summary} settings={settings} /></div>
+        <div ref={measure}><InvoiceDocument summary={summary} settings={settings} kind={kind} /></div>
       </div>
 
       <div ref={viewport} tabIndex={0} aria-label="Printed pages. Scroll to see each page." className="invoice-preview max-h-[calc(100vh-11rem)] min-h-[20rem] overflow-y-auto rounded-md border border-border bg-muted/40 p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
@@ -108,7 +108,7 @@ export function InvoicePreview({ settings, issuer, guests, documentFor }: { sett
                   <div style={{ width: sheetW, height: pageH, transform: `scale(${scale})`, transformOrigin: "top left", position: "relative", boxSizing: "border-box" }}>
                     <div style={{ position: "absolute", left: margin * PX_PER_MM, top: margin * PX_PER_MM, width: contentW, height: page.end - page.start, overflow: "hidden" }}>
                       <div style={{ transform: `translateY(-${page.start}px)` }}>
-                        <InvoiceDocument summary={summary} settings={settings} />
+                        <InvoiceDocument summary={summary} settings={settings} kind={kind} />
                       </div>
                     </div>
                   </div>

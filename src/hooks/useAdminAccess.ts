@@ -10,9 +10,13 @@ import {
   getAdminUser,
 } from "@/lib/authSession";
 
-export type AdminScope = "admin" | "rooms" | "kitchen";
+export type AdminScope = "admin" | "rooms" | "kitchen" | "loyalty";
 
-const SCOPES: AdminScope[] = ["admin", "rooms", "kitchen"];
+const SCOPES: AdminScope[] = ["admin", "rooms", "kitchen", "loyalty"];
+
+/** Where an account lands: the dashboard, or the reward scanner for someone who only has the Loyalty rewards role. */
+export const adminHomePath = (scopes: AdminScope[]): string =>
+  scopes.some((scope) => scope !== "loyalty") || scopes.length === 0 ? "/admin/dashboard" : "/admin/loyalty-scan";
 
 const normaliseOutletId = (value: unknown): string => {
   if (typeof value !== "string") return "";
@@ -75,8 +79,10 @@ export const useRequireAdminAccess = (required: AdminScope | AdminScope[]) => {
 
     const scopes = getAdminScopes();
     if (!hasAdminScope(scopes, requirement)) {
-      toast.error("You do not have permission to view this section.");
-      router.replace("/admin/dashboard");
+      const home = adminHomePath(scopes);
+      // Someone who only scans rewards is simply sent to the scanner when they open the dashboard.
+      if (window.location.pathname !== "/admin/dashboard") toast.error("You do not have permission to view this section.");
+      router.replace(home);
     }
   }, [router, depsKey]);
 };

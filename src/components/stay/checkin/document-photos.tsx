@@ -1,10 +1,10 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { ImagePlus } from "lucide-react";
+import { ImagePlus, RotateCcw, RotateCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { compressImage } from "@/components/stay/compress-image";
+import { compressImage, rotateImage } from "@/components/stay/compress-image";
 import type { SideImage } from "@/lib/document-photos";
 import type { PhotoSpec } from "@/lib/document-types";
 
@@ -25,6 +25,21 @@ type Props = {
 export function DocumentPhotos({ id, who, sides, images, optional, onChange, onPreview }: Props) {
   const refs = useRef<Array<HTMLInputElement | null>>([]);
   const [busy, setBusy] = useState<number | null>(null);
+
+  // A photo taken sideways can be turned a quarter turn either way before it is saved.
+  const rotate = async (index: number, clockwise: boolean) => {
+    const image = images[index];
+    if (!image?.dataUrl) return;
+    setBusy(index);
+    try {
+      const turned = await rotateImage(image.dataUrl, image.name || `photo-${index + 1}`, clockwise);
+      onChange(index, { dataUrl: turned.dataUrl, name: turned.name, type: turned.type });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to turn that photo");
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const pick = async (index: number, file: File | undefined) => {
     if (!file) return;
@@ -84,6 +99,16 @@ export function DocumentPhotos({ id, who, sides, images, optional, onChange, onP
                   <ImagePlus className="mr-2 h-4 w-4" strokeWidth={1.75} aria-hidden />
                   {busy === index ? "Processing" : image?.dataUrl ? "Replace" : "Upload"}
                 </Button>
+                {image?.dataUrl ? (
+                  <span className="flex gap-1">
+                    <Button type="button" variant="outline" size="icon" className="h-8 w-8" disabled={busy === index} aria-label={`Turn the ${side} photo of ${who} anticlockwise`} onClick={() => void rotate(index, false)}>
+                      <RotateCcw className="h-4 w-4" strokeWidth={1.75} aria-hidden />
+                    </Button>
+                    <Button type="button" variant="outline" size="icon" className="h-8 w-8" disabled={busy === index} aria-label={`Turn the ${side} photo of ${who} clockwise`} onClick={() => void rotate(index, true)}>
+                      <RotateCw className="h-4 w-4" strokeWidth={1.75} aria-hidden />
+                    </Button>
+                  </span>
+                ) : null}
               </div>
             </div>
           );

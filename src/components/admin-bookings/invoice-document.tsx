@@ -13,7 +13,7 @@ import {
   roomMismatchNote,
 } from "./invoice-details";
 import { formatPhone } from "@/lib/phone";
-import { LINE_MM, documentPrints, documentSidePrints, normaliseInvoiceSettings, type InvoiceSettings } from "@/lib/invoice-settings";
+import { DOCUMENT_LABEL, LINE_MM, defaultsFor, documentPrints, documentSidePrints, normaliseInvoiceSettings, type DocumentKind, type InvoiceSettings } from "@/lib/invoice-settings";
 import { paymentModeLabel } from "@/lib/payment-modes";
 import { roomChargeLines, gstBasis } from "./invoice-lines";
 import { bookingTotal, outletLabel, stayNights } from "./utils";
@@ -44,10 +44,10 @@ function Field({ label, children, className }: { label: string; children: ReactN
 }
 
 /** Plain, print-first folio. Uses fixed ink-on-paper styling so it prints identically in light and dark themes. */
-export function InvoiceDocument({ summary, settings }: { summary: BillingSummary; settings?: InvoiceSettings }) {
+export function InvoiceDocument({ summary, settings, kind = "invoice" }: { summary: BillingSummary; settings?: InvoiceSettings; kind?: DocumentKind }) {
   const { booking } = summary;
   // What to show comes from Settings for the branch; a preview passes its own.
-  const cfg = settings ?? normaliseInvoiceSettings(summary.invoice_settings);
+  const cfg = settings ?? normaliseInvoiceSettings(kind === "bill" ? summary.bill_settings : summary.invoice_settings, defaultsFor(kind));
   const show = cfg.show;
   // The branch's own details from Settings; the site-wide ones fill in anything left blank.
   const inv = summary.invoice;
@@ -62,6 +62,8 @@ export function InvoiceDocument({ summary, settings }: { summary: BillingSummary
   const contactLine = [show.branch_phone ? issuer.phone : "", show.branch_email ? issuer.email : ""].filter(Boolean).join(" | ");
   const guestSectionShown = [show.billed_to, show.guest_phone, show.guest_email, show.booking_code, show.branch_name, show.stay_dates, show.guest_count, show.booked_on, show.checked_in_at, show.checked_out_at].some(Boolean);
   const roomColumns = [show.col_requested_room, show.col_assigned_room, show.col_assigned_type, show.col_room_status].filter(Boolean).length;
+  const payableShown = show.amount_payable && [show.pay_before_gst, show.pay_gst, show.pay_round_off, show.pay_total, show.payments, show.balance_due].some(Boolean);
+  const bothBlocks = show.room_charges && show.food_charges;
   const chargeColumns = 2 + (show.charge_qty ? 1 : 0) + (show.charge_rate ? 1 : 0);
   const nights = stayNights(booking);
   const roomTotal = summary.roomTotal || bookingTotal(booking);
@@ -92,15 +94,15 @@ export function InvoiceDocument({ summary, settings }: { summary: BillingSummary
     <article className="invoice-sheet bg-white p-8 text-[12px] leading-snug text-neutral-900">
       <header className="flex items-start justify-between gap-6 border-b border-neutral-300 pb-3">
         <div>
-          <h2 className="font-display text-xl leading-tight text-neutral-900">{issuer.name}</h2>
-          {issuer.descriptor ? <p className="text-neutral-600">{issuer.descriptor}</p> : null}
+          {show.heading_name ? <h2 className="font-display text-xl leading-tight text-neutral-900">{issuer.name}</h2> : null}
+          {show.heading_name && issuer.descriptor ? <p className="text-neutral-600">{issuer.descriptor}</p> : null}
           {show.branch_address ? <p className="mt-1 max-w-xs whitespace-pre-line text-neutral-600">{issuer.address}</p> : null}
           {contactLine ? <p className="text-neutral-600">{contactLine}</p> : null}
           {show.gstin && issuer.gstin ? <p className="mt-0.5 font-medium text-neutral-800">GSTIN: <span className="font-mono">{issuer.gstin}</span></p> : null}
         </div>
         <div className="text-right">
-          <p className={LABEL}>Guest folio</p>
-          <p className="font-mono text-sm">{booking.booking_code}</p>
+          {show.heading_code ? <p className={LABEL}>{DOCUMENT_LABEL[kind].heading}</p> : null}
+          {show.heading_code ? <p className="font-mono text-sm">{booking.booking_code}</p> : null}
           {show.folio_status ? <p className="text-neutral-600">Status: {statusLabel(booking.status)}</p> : null}
           {show.issued_date ? <p className="text-neutral-600">Issued {formatDateTime(new Date())}</p> : null}
         </div>
@@ -203,9 +205,11 @@ export function InvoiceDocument({ summary, settings }: { summary: BillingSummary
       </section>
       ) : null}
 
+      {show.charges ? (
       <section className="py-3">
         <p className={LABEL}>Charges</p>
         <table className="mt-1 w-full border-collapse">
+          {show.charge_headings ? (
           <thead>
             <tr className="border-b border-neutral-300 text-left text-[10px] uppercase tracking-widest text-neutral-500">
               <th className="py-1 font-medium">Description</th>
@@ -214,10 +218,13 @@ export function InvoiceDocument({ summary, settings }: { summary: BillingSummary
               <th className="py-1 text-right font-medium">Amount</th>
             </tr>
           </thead>
+          ) : null}
           <tbody>
+            {show.room_charges ? (
+            <>
             <tr className="break-inside-avoid">
               <td colSpan={chargeColumns} className="pb-0.5 pt-2 font-semibold">
-                A. Room charges
+                {bothBlocks ? "A. Room charges" : "Room charges"}
               </td>
             </tr>
             {roomLines.map((line) => (
@@ -235,16 +242,23 @@ export function InvoiceDocument({ summary, settings }: { summary: BillingSummary
                 <td className="py-0.5 text-right tabular-nums">{formatINR(line.amount)}</td>
               </tr>
             ))}
+            {show.room_subtotal ? (
             <tr className="break-inside-avoid border-t border-neutral-200 font-medium">
               <td colSpan={chargeColumns - 1} className="py-1 text-right">
-                Room charges (A)
+                {bothBlocks ? "Room charges (A)" : "Room charges"}
               </td>
               <td className="py-1 text-right tabular-nums">{formatINR(roomTotal)}</td>
             </tr>
+            ) : null}
 
+            </>
+            ) : null}
+
+            {show.food_charges ? (
+            <>
             <tr className="break-inside-avoid">
               <td colSpan={chargeColumns} className="pb-0.5 pt-3 font-semibold">
-                B. Food and beverages
+                {bothBlocks ? "B. Food and beverages" : "Food and beverages"}
               </td>
             </tr>
             {show.food_items && summary.orders.length === 0 ? (
@@ -274,24 +288,31 @@ export function InvoiceDocument({ summary, settings }: { summary: BillingSummary
                 ))}
               </Fragment>
             ))}
+            {show.food_subtotal ? (
             <tr className="break-inside-avoid border-t border-neutral-200 font-medium">
               <td colSpan={chargeColumns - 1} className="py-1 text-right">
-                Food and beverages (B)
+                {bothBlocks ? "Food and beverages (B)" : "Food and beverages"}
               </td>
               <td className="py-1 text-right tabular-nums">{formatINR(summary.foodTotal)}</td>
             </tr>
+            ) : null}
+            </>
+            ) : null}
           </tbody>
+          {show.charges_total ? (
           <tfoot>
             <tr className="break-inside-avoid border-t border-neutral-400 font-semibold">
               <td colSpan={chargeColumns - 1} className="pt-1.5 text-right">
-                Total before GST (A + B)
+                {bothBlocks ? "Total before GST (A + B)" : "Total before GST"}
               </td>
               <td className="pt-1.5 text-right tabular-nums">{formatINR(summary.subtotal)}</td>
             </tr>
           </tfoot>
+          ) : null}
         </table>
         <Gap lines={cfg.spacers.after_charges} />
       </section>
+      ) : null}
 
       {show.gst_breakdown ? (
       <section className="break-inside-avoid border-t border-neutral-300 py-3">
@@ -331,6 +352,7 @@ export function InvoiceDocument({ summary, settings }: { summary: BillingSummary
                 {show.gst_total ? <td className="py-1 text-right tabular-nums">{formatINR(line.cgst + line.sgst)}</td> : null}
               </tr>
             ))}
+            {show.gst_total_row ? (
             <tr className="font-medium">
               <td className="pt-1">Total</td>
               {show.gst_taxable ? <td className="pt-1 text-right tabular-nums">{formatINR(summary.gst.taxable)}</td> : null}
@@ -338,12 +360,14 @@ export function InvoiceDocument({ summary, settings }: { summary: BillingSummary
               {show.gst_sgst ? <td className="pt-1 text-right tabular-nums">{formatINR(summary.gst.sgst)}</td> : null}
               {show.gst_total ? <td className="pt-1 text-right tabular-nums">{formatINR(summary.gst.gst)}</td> : null}
             </tr>
+            ) : null}
           </tbody>
         </table>
         <Gap lines={cfg.spacers.after_gst} />
       </section>
       ) : null}
 
+      {payableShown ? (
       <section className="break-inside-avoid border-t border-neutral-300 py-3">
         <p className={LABEL}>Amount payable</p>
         <table className="mt-1 ml-auto w-full max-w-sm border-collapse">
@@ -374,10 +398,12 @@ export function InvoiceDocument({ summary, settings }: { summary: BillingSummary
                 </td>
               </tr>
             ) : null}
-            <tr className="border-t border-neutral-400 text-sm font-semibold">
-              <td className="pt-1.5">Total payable</td>
-              <td className="pt-1.5 text-right tabular-nums">{formatINR(summary.grandTotal)}</td>
-            </tr>
+            {show.pay_total ? (
+              <tr className="border-t border-neutral-400 text-sm font-semibold">
+                <td className="pt-1.5">Total payable</td>
+                <td className="pt-1.5 text-right tabular-nums">{formatINR(summary.grandTotal)}</td>
+              </tr>
+            ) : null}
             {(show.payments ? payments : []).map((payment, index) => (
               <tr key={`pay-${index}`} className="text-neutral-700">
                 <td className="py-0.5">
@@ -397,6 +423,7 @@ export function InvoiceDocument({ summary, settings }: { summary: BillingSummary
         </table>
         <Gap lines={cfg.spacers.after_payable} />
       </section>
+      ) : null}
 
       {show.guest_verification && (guests.length > 0 || legacySignature) ? (
         <section className="border-t border-neutral-300 py-3">

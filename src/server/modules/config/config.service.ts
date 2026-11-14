@@ -1,7 +1,7 @@
 import type { ObjectId } from "mongodb";
 import { outletDirectory, outletKeyOf } from "../../utils/outlets";
 import { toObjectId } from "../../utils/objectId";
-import { InvoiceSettings, InvoiceSettingSet, invoiceSetsError, invoiceSettingsForOutlet, normaliseInvoiceSets } from "../../../lib/invoice-settings";
+import { DocumentKind, InvoiceSettings, InvoiceSettingSet, defaultsFor, invoiceSetsError, invoiceSettingsForOutlet, normaliseInvoiceSets } from "../../../lib/invoice-settings";
 import { DocumentTypeConfig, documentTypesError, normaliseDocumentTypes } from "../../../lib/document-types";
 import { HttpError } from "../../httpError";
 import { mongoConnection } from "../../mongo";
@@ -13,12 +13,16 @@ const COLLECTION = "app_config";
 const CHECKIN_KEY = "checkin_rules";
 const VARIABLES_KEY = "template_variables";
 const DOCUMENTS_KEY = "document_types";
-const INVOICE_KEY = "invoice_settings";
+/** The invoice and the bill each keep their own settings, per branch. */
+const SETTINGS_KEY: Record<DocumentKind, string> = { invoice: "invoice_settings", bill: "bill_settings" };
+const kindOf = (value: unknown): DocumentKind => (value === "bill" ? "bill" : "invoice");
 
 type ConfigRequest = {
   action?: "get" | "update_checkin_rules" | "update_template_variables" | "update_document_types" | "update_invoice_settings";
   document_types?: unknown;
   invoice_setting_sets?: unknown;
+  /** update_invoice_settings: which document the settings are for. */
+  kind?: DocumentKind;
   checkin_rule_sets?: unknown;
   template_variables?: unknown;
 };
@@ -43,15 +47,15 @@ export const configService = {
   },
 
   /** What the printed invoice shows, per branch. Stored with branch ids, shown with branch keys. */
-  async getInvoiceSettingSets(): Promise<InvoiceSettingSet[]> {
+  async getInvoiceSettingSets(kind: DocumentKind = "invoice"): Promise<InvoiceSettingSet[]> {
     await outletDirectory.load();
-    const doc = await mongoConnection.getDb().collection(COLLECTION).findOne({ _id: INVOICE_KEY as any });
-    return normaliseInvoiceSets(Array.isArray(doc?.sets) ? doc.sets.map((set: any) => ({ ...set, outlets: asKeys(set?.outlets) })) : []);
+    const doc = await mongoConnection.getDb().collection(COLLECTION).findOne({ _id: SETTINGS_KEY[kind] as any });
+    return normaliseInvoiceSets(Array.isArray(doc?.sets) ? doc.sets.map((set: any) => ({ ...set, outlets: asKeys(set?.outlets) })) : [], defaultsFor(kind));
   },
 
   /** The invoice settings for a branch (its location key). */
-  async getInvoiceSettings(outletKey?: string | null): Promise<InvoiceSettings> {
-    return invoiceSettingsForOutlet(await this.getInvoiceSettingSets(), outletKey);
+  async getInvoiceSettings(outletKey?: string | null, kind: DocumentKind = "invoice"): Promise<InvoiceSettings> {
+    return invoiceSettingsForOutlet(await this.getInvoiceSettingSets(kind), outletKey, defaultsFor(kind));
   },
 
   /** The identity documents guests can give and how many photos each needs. */
@@ -84,15 +88,16 @@ export const configService = {
     if (request?.action === "update_invoice_settings") {
       if (!user.roles.includes("admin")) throw new HttpError(403, "Only an administrator can change these settings.");
       if (!user.outlets.includes("all")) throw new HttpError(403, "Only an all-branch administrator can change the invoice settings.");
-      const sets = normaliseInvoiceSets(request.invoice_setting_sets);
+      const kind = kindOf(request.kind);
+      const sets = normaliseInvoiceSets(request.invoice_setting_sets, defaultsFor(kind));
       await outletDirectory.load();
       const problem = invoiceSetsError(sets, outletDirectory.allKeys());
       if (problem) throw new HttpError(400, problem);
       await mongoConnection
         .getDb()
         .collection(COLLECTION)
-        .updateOne({ _id: INVOICE_KEY as any }, { $set: { sets: sets.map((set) => ({ ...set, outlets: asIds(set.outlets) })), updated_at: new Date(), updated_by: toObjectId(user.id) ?? user.id } }, { upsert: true });
-      return { invoice_setting_sets: sets };
+        .updateOne({ _id: SETTINGS_KEY[kind] as any }, { $set: { sets: sets.map((set) => ({ ...set, outlets: asIds(set.outlets) })), updated_at: new Date(), updated_by: toObjectId(user.id) ?? user.id } }, { upsert: true });
+      return kind === "bill" ? { bill_setting_sets: sets } : { invoice_setting_sets: sets };
     }
     if (request?.action === "update_document_types") {
       if (!user.roles.includes("admin")) throw new HttpError(403, "Only an administrator can change these settings.");
@@ -120,6 +125,6 @@ export const configService = {
         .updateOne({ _id: VARIABLES_KEY as any }, { $set: { variables: variables.map((variable) => ({ ...variable, outlets: asIds(variable.outlets) })), updated_at: new Date(), updated_by: toObjectId(user.id) ?? user.id } }, { upsert: true });
       return { template_variables: variables };
     }
-    return { checkin_rule_sets: await this.getCheckinRuleSets(), template_variables: await this.getTemplateVariables(), document_types: await this.getDocumentTypes(), invoice_setting_sets: await this.getInvoiceSettingSets() };
+    return { checkin_rule_sets: await this.getCheckinRuleSets(), template_variables: await this.getTemplateVariables(), document_types: await this.getDocumentTypes(), invoice_setting_sets: await this.getInvoiceSettingSets("invoice"), bill_setting_sets: await this.getInvoiceSettingSets("bill") };
   },
 };

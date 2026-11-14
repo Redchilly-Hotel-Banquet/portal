@@ -89,10 +89,12 @@ export function ConfigPanel() {
         <TabsTrigger value="checkin">Check-in rules</TabsTrigger>
         <TabsTrigger value="documents">Documents</TabsTrigger>
         <TabsTrigger value="invoice">Invoice</TabsTrigger>
+        <TabsTrigger value="bill">Bill</TabsTrigger>
         <TabsTrigger value="messages">Message variables</TabsTrigger>
       </TabsList>
       <TabsContent value="documents" className="mt-0"><DocumentTypesPanel /></TabsContent>
-      <TabsContent value="invoice" className="mt-0"><InvoicePanel /></TabsContent>
+      <TabsContent value="invoice" className="mt-0"><InvoicePanel kind="invoice" /></TabsContent>
+      <TabsContent value="bill" className="mt-0"><InvoicePanel kind="bill" /></TabsContent>
       <TabsContent value="messages" className="mt-0"><TemplateVariablesPanel /></TabsContent>
       <TabsContent value="checkin" className="mt-0">
       <form

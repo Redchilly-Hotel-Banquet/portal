@@ -14,7 +14,9 @@ import { getAdminOutlets } from "@/hooks/useAdminAccess";
 import { useDocumentTypes } from "@/hooks/useDocumentTypes";
 import { apiPost } from "@/lib/apiClient";
 import {
-  DEFAULT_INVOICE_SETTINGS,
+  DOCUMENT_LABEL,
+  defaultsFor,
+  type DocumentKind,
   INVOICE_FIELD_GROUPS,
   INVOICE_LIMITS,
   LINE_MM,
@@ -32,10 +34,11 @@ import {
 import { InvoicePreview } from "./invoice-preview";
 
 const KEY = ["invoice-settings"];
+const keyFor = (kind: DocumentKind) => (kind === "bill" ? ["bill-settings"] : KEY);
 
 
-const withEveryBranch = (sets: InvoiceSettingSet[]): InvoiceSettingSet[] => {
-  const all = sets.find((set) => set.outlets.length === 0) ?? { outlets: [], settings: DEFAULT_INVOICE_SETTINGS };
+const withEveryBranch = (sets: InvoiceSettingSet[], defaults: InvoiceSettings): InvoiceSettingSet[] => {
+  const all = sets.find((set) => set.outlets.length === 0) ?? { outlets: [], settings: defaults };
   return [all, ...sets.filter((set) => set.outlets.length > 0)];
 };
 
@@ -69,7 +72,9 @@ function Slider({ id, label, value, range, unit, onChange }: { id: string; label
 }
 
 /** What the printed invoice shows, set for every branch or for chosen ones, with a preview of the printed sheet. */
-export function InvoicePanel() {
+export function InvoicePanel({ kind = "invoice" }: { kind?: DocumentKind }) {
+  const defaults = defaultsFor(kind);
+  const label = DOCUMENT_LABEL[kind];
   const queryClient = useQueryClient();
   const canEdit = getAdminOutlets().includes("all");
   const [sets, setSets] = useState<InvoiceSettingSet[]>([]);
@@ -78,9 +83,9 @@ export function InvoicePanel() {
   const [samples, setSamples] = useState<Array<{ guests: number; docs: string[] }>>([]);
 
   const query = useQuery({
-    queryKey: KEY,
-    queryFn: () => apiPost<{ invoice_setting_sets?: unknown }>("/admin/config", { action: "get" }, true),
-    select: (data) => withEveryBranch(normaliseInvoiceSets(data?.invoice_setting_sets)),
+    queryKey: keyFor(kind),
+    queryFn: () => apiPost<{ invoice_setting_sets?: unknown; bill_setting_sets?: unknown }>("/admin/config", { action: "get" }, true),
+    select: (data) => withEveryBranch(normaliseInvoiceSets(kind === "bill" ? data?.bill_setting_sets : data?.invoice_setting_sets, defaults), defaults),
     refetchOnWindowFocus: false,
   });
   const branches = useQuery<Branch[]>({
@@ -96,17 +101,17 @@ export function InvoicePanel() {
   }, [query.data]);
 
   const save = useMutation({
-    mutationFn: () => apiPost("/admin/config", { action: "update_invoice_settings", invoice_setting_sets: sets }, true),
+    mutationFn: () => apiPost("/admin/config", { action: "update_invoice_settings", kind, invoice_setting_sets: sets }, true),
     onSuccess: () => {
-      toast.success("Invoice settings saved");
-      void queryClient.invalidateQueries({ queryKey: KEY });
+      toast.success(`${label.name} settings saved`);
+      void queryClient.invalidateQueries({ queryKey: keyFor(kind) });
       void queryClient.invalidateQueries({ queryKey: ["admin-bookings"] });
     },
-    onError: (err) => toast.error(err instanceof Error ? err.message : "Could not save the invoice settings"),
+    onError: (err) => toast.error(err instanceof Error ? err.message : `Could not save the ${label.name.toLowerCase()} settings`),
   });
 
   if (query.isLoading) return <Skeleton className="h-64 w-full" />;
-  if (query.isError) return <p role="alert" className="text-sm text-destructive">Invoice settings could not be loaded.</p>;
+  if (query.isError) return <p role="alert" className="text-sm text-destructive">{label.name} settings could not be loaded.</p>;
 
   const names = new Map((branches.data ?? []).map((b) => [b.location_key, b.name || b.location_key]));
   const patch = (index: number, change: Partial<InvoiceSettingSet>) => setSets((prev) => prev.map((set, i) => (i === index ? { ...set, ...change } : set)));
@@ -168,9 +173,9 @@ export function InvoicePanel() {
       }}
     >
       <div>
-        <h2 className="text-lg">Printed invoice</h2>
+        <h2 className="text-lg">{label.title}</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Choose what the invoice shows, the paper it prints on and how big the photos are. The first set applies to every branch; add another set to give chosen branches their own. The preview shows the printed sheet, so you can try different numbers of guests.
+          Choose what the {label.name.toLowerCase()} shows, the paper it prints on and how big the photos are. The first set applies to every branch; add another set to give chosen branches their own. The preview shows the printed sheet, so you can try different numbers of guests.
         </p>
       </div>
 
@@ -333,7 +338,7 @@ export function InvoicePanel() {
             {/* The printed sheet, always beside the settings and following them as they change. */}
             <div className="relative min-w-0 xl:sticky xl:top-4">
               <h4 className="mb-2 text-sm font-medium">Preview of the printed sheet</h4>
-              <InvoicePreview settings={set.settings} issuer={issuerFor(set)} guests={samples[index]?.guests ?? 2} documentFor={Array.from({ length: samples[index]?.guests ?? 2 }, (_, g) => sampleDocument(index, g))} />
+              <InvoicePreview kind={kind} settings={set.settings} issuer={issuerFor(set)} guests={samples[index]?.guests ?? 2} documentFor={Array.from({ length: samples[index]?.guests ?? 2 }, (_, g) => sampleDocument(index, g))} />
             </div>
           </div>
         </section>
@@ -341,7 +346,7 @@ export function InvoicePanel() {
 
       {canEdit ? (
         <div className="flex flex-wrap items-center gap-3">
-          <Button type="button" variant="outline" onClick={() => setSets((prev) => [...prev, { outlets: [], settings: prev[0]?.settings ?? DEFAULT_INVOICE_SETTINGS }])}>
+          <Button type="button" variant="outline" onClick={() => setSets((prev) => [...prev, { outlets: [], settings: prev[0]?.settings ?? defaults }])}>
             <Plus className="mr-2 h-4 w-4" aria-hidden /> Add settings for chosen branches
           </Button>
           <Button type="submit" disabled={!dirty || save.isPending}>

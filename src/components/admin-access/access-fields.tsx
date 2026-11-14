@@ -6,6 +6,7 @@ export const ROLE_OPTIONS = [
   { value: "admin", label: "Administrator", hint: "Everything, including prices, access and settings" },
   { value: "rooms", label: "Front desk", hint: "Bookings, check-in and check-out, rooms on or off" },
   { value: "kitchen", label: "Kitchen", hint: "Orders, and dishes on or off" },
+  { value: "loyalty", label: "Loyalty rewards", hint: "Scan and redeem loyalty reward QR codes" },
 ] as const;
 
 export type BranchOption = { location_key: string; name: string };

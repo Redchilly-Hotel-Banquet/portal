@@ -31,8 +31,16 @@ export function getUpdateParams(req) {
   return { key, text }
 }
 
+/**
+ * A phone number as digits that start with the country code ("919876543210"). That is how reward customers and WhatsApp
+ * campaigns are keyed. An Indian number typed without its code (10 digits starting 6 to 9, or 0 and 10 digits) is read
+ * as +91, so the same person is never counted twice.
+ */
 export function normalizePhone(phone) {
-  return String(phone || '').replace(/\D/g, '')
+  const digits = String(phone || '').replace(/\D/g, '')
+  if (/^[6-9]\d{9}$/.test(digits)) return `91${digits}`
+  if (/^0[6-9]\d{9}$/.test(digits)) return `91${digits.slice(1)}`
+  return digits
 }
 
 export function buildWhatsappUrl({ phone, text }) {

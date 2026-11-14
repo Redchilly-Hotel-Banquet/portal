@@ -1800,7 +1800,9 @@ export class BookingService {
       },
       invoice,
       // What the printed invoice shows, set per branch under Settings.
-      invoice_settings: await configService.getInvoiceSettings(outletKeyOf(booking.outlet_id)),
+      invoice_settings: await configService.getInvoiceSettings(outletKeyOf(booking.outlet_id), "invoice"),
+      // The bill has its own settings.
+      bill_settings: await configService.getInvoiceSettings(outletKeyOf(booking.outlet_id), "bill"),
       foodTotal,
       roomTotal,
       /** Room plus food before GST. */

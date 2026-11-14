@@ -57,6 +57,7 @@ export async function createRewardQrRecord({
         phone,
         customerName: customerName || user?.name || '',
         orderId: normalizedOrderId,
+        code,
         source,
         now
       })
@@ -118,7 +119,7 @@ export async function createRewardQrRecord({
   }
 }
 
-export async function verifyRewardQrCode({ code }) {
+export async function verifyRewardQrCode({ code, scannedBy = null }) {
   const db = await getDb()
   const collection = db.collection(getRewardCollectionName())
   const customerCollection = db.collection(getRewardCustomerCollectionName())
@@ -154,7 +155,7 @@ export async function verifyRewardQrCode({ code }) {
   if (!claimed) {
     throw new HttpError(409, 'Reward QR code was already used or has expired')
   }
-  const visitState = await updateCustomerVisitState(customerCollection, record, reward)
+  const visitState = await updateCustomerVisitState(customerCollection, record, reward, scannedBy)
   const verifiedRecord = {
     status: 'verified',
     verifiedAt: now,
@@ -293,8 +294,37 @@ export async function getCustomerRewardStatus({ phone }) {
 
   return {
     ...customer,
+    qrHistory: await describeQrHistory(db, customer),
     user: user || null
   }
+}
+
+/**
+ * Whether each QR the customer was given has been scanned. A scan is noted on the history when it happens; for older ones
+ * it is worked out from the reward history and from the QR records still stored.
+ */
+async function describeQrHistory(db, customer) {
+  const stored = await db
+    .collection(getRewardCollectionName())
+    .find({ phone: customer.phone }, { projection: { _id: 0, code: 1, orderId: 1, status: 1, expiresAt: 1 } })
+    .toArray()
+  const byCode = new Map(stored.map(row => [row.code, row]))
+  const byOrder = new Map(stored.map(row => [row.orderId, row]))
+  const given = new Map((customer.rewardHistory || []).map(row => [row.orderId, row.unlockedAt]))
+  const now = Date.now()
+  return (customer.qrHistory || []).map(item => {
+    if (item.redeemedAt) return { ...item, state: 'redeemed', stateAt: item.redeemedAt }
+    const row = (item.code && byCode.get(item.code)) || byOrder.get(item.orderId)
+    if (row) {
+      if (row.status === 'verified') return { ...item, state: 'redeemed' }
+      if (row.status === 'cancelled') return { ...item, state: 'cancelled' }
+      if (row.expiresAt && new Date(row.expiresAt).getTime() <= now) return { ...item, state: 'expired', stateAt: row.expiresAt }
+      return { ...item, state: 'waiting', stateAt: row.expiresAt }
+    }
+    if (given.has(item.orderId)) return { ...item, state: 'redeemed', stateAt: given.get(item.orderId) }
+    // Not stored any more and no reward was recorded for it: it expired or was cleared without being scanned.
+    return { ...item, state: 'removed' }
+  })
 }
 
 export async function cleanupRewardRecords({ force = false } = {}) {
@@ -434,7 +464,7 @@ function buildRewardConfig({
   }
 }
 
-async function updateCustomerVisitState(collection, record, reward) {
+async function updateCustomerVisitState(collection, record, reward, scannedBy = null) {
   if (!record.phone) {
     return {
       phone: '',
@@ -460,13 +490,17 @@ async function updateCustomerVisitState(collection, record, reward) {
     nextVisitCount = nextVisitCount - visitTarget
   }
 
-  const rewardHistoryItem = unlocked
+  // Every scan that gives a reward is recorded: a discount reward on each scan, a visit reward when the visits are reached.
+  const givesReward = unlocked || record.rewardConfig?.mode === 'discount'
+  const rewardHistoryItem = givesReward
     ? {
         reward,
         unlockedAt: now,
         orderId: record.orderId,
         source: record.source,
-        visitTarget
+        mode: record.rewardConfig?.mode === 'visits' ? 'visits' : 'discount',
+        ...(scannedBy ? { scannedBy: scannedBy.name } : {}),
+        ...(record.rewardConfig?.mode === 'visits' ? { visitTarget } : {})
       }
     : null
 
@@ -496,13 +530,19 @@ async function updateCustomerVisitState(collection, record, reward) {
     update.$push = {
       rewardHistory: {
         $each: [rewardHistoryItem],
-        $slice: -25
+        $slice: -50
       }
     }
     update.$inc = { rewardsUnlocked: 1 }
   }
 
   await collection.updateOne({ phone: record.phone }, update, { upsert: true })
+  // Note on the customer's history that this QR has been scanned.
+  await collection.updateOne(
+    { phone: record.phone },
+    { $set: { 'qrHistory.$[h].redeemedAt': now, ...(scannedBy ? { 'qrHistory.$[h].redeemedBy': scannedBy.name } : {}) } },
+    { arrayFilters: [{ 'h.redeemedAt': { $exists: false }, $or: [{ 'h.code': record.code }, { 'h.code': { $exists: false }, 'h.orderId': record.orderId }] }] }
+  )
 
   return {
     phone: record.phone,
@@ -517,13 +557,14 @@ async function updateCustomerVisitState(collection, record, reward) {
   }
 }
 
-async function upsertCustomerOnQrGeneration(collection, { phone, customerName, orderId, source, now }) {
+async function upsertCustomerOnQrGeneration(collection, { phone, customerName, orderId, code, source, now }) {
   await ensureRewardCustomerIndexes(collection)
 
   const currentCustomer = await collection.findOne({ phone })
   const resolvedCustomerName = customerName || currentCustomer?.customerName || ''
   const qrHistoryItem = {
     orderId,
+    ...(code ? { code } : {}),
     source,
     generatedAt: now
   }

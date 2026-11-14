@@ -13,6 +13,7 @@ import {
   LogOut,
   Menu,
   QrCode,
+  ScanLine,
   ShoppingBag,
   Settings,
   Store,
@@ -50,9 +51,10 @@ export const ADMIN_NAV: NavItem[] = [
   { label: "Access", href: "/admin/access", icon: UserCog, scopes: ["admin"] },
   { label: "Analytics", href: "/admin/analytics", icon: BarChart3, scopes: ["admin"] },
   { label: "QR rewards", href: "/admin/rewards", icon: QrCode, scopes: ["admin"] },
+  { label: "Scan reward QR", href: "/admin/loyalty-scan", icon: ScanLine, scopes: ["admin", "loyalty"] },
 ];
 
-const ROLE_LABEL: Record<AdminScope, string> = { admin: "Administrator", rooms: "Front desk", kitchen: "Kitchen" };
+const ROLE_LABEL: Record<AdminScope, string> = { admin: "Administrator", rooms: "Front desk", kitchen: "Kitchen", loyalty: "Loyalty rewards" };
 
 type AdminShellProps = {
   scope: AdminScope | AdminScope[];

@@ -141,6 +141,8 @@ export type BillingSummary = {
   roomTotal: number;
   /** What the printed invoice shows, as set under Settings for the branch. */
   invoice_settings?: unknown;
+  /** What the printed bill shows, set separately under Settings. */
+  bill_settings?: unknown;
   /** Who the invoice is from, as set under Settings for the branch. */
   invoice?: { legal_name: string; gstin: string; address: string; phone: string; email: string; terms: string };
   /** Room plus food before GST. */

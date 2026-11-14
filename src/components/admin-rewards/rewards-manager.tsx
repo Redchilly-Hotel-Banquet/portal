@@ -7,6 +7,9 @@ import { AdminShell } from "@/components/admin/admin-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PhoneInput } from "@/components/ui/phone-input";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { formatPhone } from "@/lib/phone";
+import { QrImage } from "./qr-image";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CampaignAnalytics } from "./campaign-analytics";
 import { getAdminUser } from "@/lib/authSession";
@@ -48,7 +51,23 @@ function Panel({ title, children }: { title: string; children: ReactNode }) {
   return <section className="space-y-4 rounded-md border border-border bg-card p-5"><h2 className="font-display text-xl">{title}</h2>{children}</section>;
 }
 // Reward and campaign numbers are stored as digits that start with the country code; the phone field wants a "+".
-const plus = (value: string) => (value && !value.startsWith("+") ? `+${value}` : value);
+const plus = (value: string) => (!value || value.startsWith("+") ? value : /^[6-9]\d{9}$/.test(value.replace(/\D/g, "")) ? `+91${value.replace(/\D/g, "")}` : `+${value.replace(/\D/g, "")}`);
+/** The link a reward's QR opens: this site's own address (or the one set under Settings), built from the code. A link saved long ago may name an old host. */
+const verifyLink = (row: Row, settings?: Row) => `${String(settings?.publicBaseUrl || (typeof window !== "undefined" ? window.location.origin : "")).replace(/\/+$/, "")}/reward/verify?code=${encodeURIComponent(row.code)}`;
+const isExpired = (row: Row) => row.status === "pending" && row.expiresAt && new Date(row.expiresAt).getTime() <= Date.now();
+const SOURCES = ["manual", "zomato", "swiggy"];
+/** Whether a customer's QR was scanned, in words and colour. */
+function QrState({ row }: { row: Row }) {
+  const states: Record<string, [string, string]> = {
+    redeemed: ["Redeemed", "text-success"],
+    waiting: ["Not redeemed yet", "text-amber-600"],
+    expired: ["Expired, not redeemed", "text-destructive"],
+    cancelled: ["Cancelled", "text-muted-foreground"],
+    removed: ["Not redeemed (no longer stored)", "text-muted-foreground"],
+  };
+  const [label, tone] = states[row.state] ?? ["Unknown", "text-muted-foreground"];
+  return <span className={`inline-flex flex-col ${tone}`}><span className="font-medium">{label}</span>{row.stateAt ? <small className="font-normal text-muted-foreground">{row.state === "waiting" ? "valid until " : row.state === "expired" ? "on " : ""}{date(row.stateAt)}</small> : null}</span>;
+}
 const NONE = "__none__"; // Radix Select cannot hold an empty-string item
 /** The app's styled dropdown, taking [value, label] pairs; an empty value is allowed. */
 function Pick({ value, onChange, options, id }: { value: string | number; onChange: (value: string) => void; options: Array<[string | number, string]>; id?: string }) {
@@ -112,7 +131,7 @@ export function RewardsManager() {
         {tab === "campaigns" && <Campaigns rows={data.campaigns} busy={busy} run={run} />}
         {tab === "analytics" && <CampaignAnalytics campaigns={data.campaigns} />}
         {tab === "generate" && <Generator options={data.options} settings={data.settings} busy={busy} run={run} />}
-        {tab === "records" && <Records options={data.options} busy={busy} run={run} />}
+        {tab === "records" && <Records options={data.options} settings={data.settings} busy={busy} run={run} />}
         {tab === "customers" && <Customers busy={busy} run={run} />}
         {tab === "options" && <Options rows={data.options} busy={busy} run={run} />}
         {tab === "settings" && <Settings initial={data.settings} busy={busy} run={run} />}
@@ -162,7 +181,7 @@ function RewardFields({ form, setForm, options }: { form: Row; setForm: (form: R
     <Field label="Order ID"><Input value={form.orderId} onChange={e => field("orderId", e.target.value)} /></Field>
     <Field label="Customer name"><Input value={form.customerName} onChange={e => field("customerName", e.target.value)} /></Field>
     <Field label="Phone"><PhoneInput required={form.rewardMode === "visits"} value={plus(form.phone)} onChange={phone => field("phone", phone)} /></Field>
-    <Field label="Order source"><Input required value={form.source} onChange={e => field("source", e.target.value)} list="qr-sources" /><datalist id="qr-sources"><option value="manual" /><option value="zomato" /><option value="swiggy" /></datalist></Field>
+    <Field label="Order source"><Pick value={SOURCES.includes(form.source) ? form.source : "other"} onChange={value => field("source", value === "other" ? "" : value)} options={[["manual", "Manual"], ["zomato", "Zomato"], ["swiggy", "Swiggy"], ["other", "Other…"]]} />{!SOURCES.includes(form.source) && <Input required placeholder="Where the order came from" value={form.source} onChange={e => field("source", e.target.value)} />}</Field>
     <Field label="Reward type"><Pick value={form.rewardMode} onChange={v => field("rewardMode", v)} options={[["discount", "Discount"], ["visits", "Visit tracker"]]} /></Field>
     {form.rewardMode === "visits" ? <Field label="Visits required"><Input required type="number" min={1} max={1000} value={form.visitTarget} onChange={e => field("visitTarget", e.target.value)} /></Field> : <>
       <Field label="Discount type"><Pick value={form.discountType} onChange={v => field("discountType", v)} options={[["percentage", "Percentage"], ["price", "Amount (₹)"]]} /></Field>
@@ -185,32 +204,49 @@ async function banner(data: Row): Promise<Blob> {
   context.fillText(`Valid until ${date(data.expiresAt)}`, 450, 960, 800);
   return new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("Unable to create image")), "image/png"));
 }
+/** What a reward's QR is shared with: the sharing message from Settings, filled in for this reward. */
+const shareText = (row: Row, link: string, settings: Row) =>
+  String(settings?.shareMessage || "").replace(/\{(customerName|orderId|verifyUrl|reward)\}/g, (_: string, key: string) => (key === "reward" ? row.rewardConfig?.rewardOptionLabel || "your reward" : key === "verifyUrl" ? link : String(row[key] || "")));
+
+/** Download, copy and share buttons for a reward's QR (the picture, the link, or a WhatsApp message to the customer). */
+function RewardShare({ row, link, settings }: { row: Row; link: string; settings: Row }) {
+  const [working, setWorking] = useState(false);
+  async function picture(action: "download" | "copy" | "share") {
+    setWorking(true);
+    try {
+      const QRCode = (await import("qrcode")).default;
+      const qrImage = await QRCode.toDataURL(link, { margin: 1, width: 560, color: { dark: "#5d070c", light: "#fff9ef" } });
+      const blob = await banner({ ...row, qrImage });
+      const file = new File([blob], `reward-${row.orderId || "qr"}.png`, { type: "image/png" });
+      if (action === "copy") { await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]); toast.success("Image copied"); }
+      else if (action === "share" && navigator.canShare?.({ files: [file] })) await navigator.share({ files: [file], title: "Red Chilly reward", text: shareText(row, link, settings) });
+      else { if (action === "share") toast.info("Sharing isn't available in this browser, so the image was downloaded."); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = file.name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
+    } catch (err) { if ((err as Error).name !== "AbortError") toast.error((err as Error).message); } finally { setWorking(false); }
+  }
+  const digits = String(row.phone || "").replace(/\D/g, "");
+  return <div className="flex flex-wrap gap-2">
+    <Button type="button" size="sm" variant="outline" onClick={async () => { await navigator.clipboard.writeText(link); toast.success("Link copied"); }}>Copy link</Button>
+    <Button type="button" size="sm" variant="outline" disabled={working} onClick={() => picture("copy")}>Copy image</Button>
+    <Button type="button" size="sm" variant="outline" disabled={working} onClick={() => picture("share")}>Share image</Button>
+    <Button type="button" size="sm" variant="outline" disabled={working} onClick={() => picture("download")}>Download image</Button>
+    <Button type="button" size="sm" variant="outline" asChild><a href={`https://api.whatsapp.com/send?${digits ? `phone=${digits}&` : ""}text=${encodeURIComponent(shareText(row, link, settings))}`} target="_blank" rel="noreferrer">Share on WhatsApp</a></Button>
+  </div>;
+}
+
 function Generator({ options, settings, busy, run }: ToolProps & { options: Row[]; settings: Row }) {
   const initial = () => ({ ...blankReward, expiresAt: localDate(new Date(Date.now() + settings.expiryDays * 86400000).toISOString()) });
   const [form, setForm] = useState<Row>(initial);
   const [result, setResult] = useState<Row | null>(null);
-  const [sharing, setSharing] = useState(false);
   const [customer, setCustomer] = useState<Row | null>(null);
   async function generate(event: FormEvent) {
     event.preventDefault(); setResult(null);
     const response = await run({ action: "generate", data: { ...form, expiresAt: form.expiresAt ? new Date(form.expiresAt).toISOString() : "" } }, "QR generated");
     if (response) { setResult(response.data); setCustomer(response.data.customer); }
   }
-  async function imageAction(action: string) {
-    if (!result) return;
-    setSharing(true);
-    try {
-      const blob = await banner(result);
-      const file = new File([blob], "red-chilly-reward.png", { type: "image/png" });
-      if (action === "copy") { await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]); toast.success("Image copied"); }
-      else if (action === "share" && navigator.canShare?.({ files: [file] })) await navigator.share({ files: [file], title: "Red Chilly reward" });
-      else { const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = file.name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
-    } catch (err) { if ((err as Error).name !== "AbortError") toast.error((err as Error).message); } finally { setSharing(false); }
-  }
   const message = result ? settings.shareMessage.replace(/\{(customerName|orderId|verifyUrl|reward)\}/g, (_: string, key: string) => String(key === "reward" ? result.rewardConfig?.rewardOptionLabel || "your reward" : result[key] || "")) : "";
   return <>
     <details className="rounded-md border border-border bg-card p-5"><summary className="cursor-pointer font-display text-xl">How are visits counted?</summary><ul className="mt-4 list-disc space-y-1.5 pl-5 text-sm text-muted-foreground">
-      <li><strong className="text-foreground">The phone number identifies the customer.</strong> A visit is added to whoever has the same phone number. Only the digits are compared, so "+91 98765 43210" and "919876543210" are the same person, but "9876543210" without the country code is a different customer. Always include the country code.</li>
+      <li><strong className="text-foreground">The phone number identifies the customer.</strong> A visit is added to whoever has the same phone number. Only the digits are compared, so "+91 98765 43210", "919876543210" and an Indian "9876543210" are all the same person. Pick the right country code for other countries.</li>
       <li><strong className="text-foreground">A visit is counted when the customer's QR is scanned</strong>, not when you generate it. Generating only records the QR against the customer (it adds to their "QR codes generated" count).</li>
       <li><strong className="text-foreground">One QR gives one visit.</strong> A QR works once; scanning it again, or after it expires, adds nothing. The Order ID is only a label and is not used to match customers or prevent repeats.</li>
       <li><strong className="text-foreground">No phone, no points.</strong> A QR generated without a phone number cannot add visits to anyone. Visit tracker rewards require a phone number.</li>
@@ -222,28 +258,52 @@ function Generator({ options, settings, busy, run }: ToolProps & { options: Row[
       <div className="flex flex-wrap gap-2 md:col-span-2"><Button disabled={busy}>Generate QR</Button><Button type="button" variant="outline" disabled={busy || !form.phone} onClick={async () => { const response = await run({ action: "customer", phone: form.phone }); if (response) setCustomer(response.customer); }}>Look up customer</Button><Button type="button" variant="outline" onClick={() => { setForm(initial()); setResult(null); setCustomer(null); }}>Reset</Button></div>
     </form></Panel>
     {customer && <Panel title="Customer visits"><p>{customer.customerName || form.customerName || "Customer"}: {customer.visitCount || 0} visits in the current cycle · {customer.totalVisits || 0} total visits · {customer.totalQrGenerated || 0} QR codes generated.</p>{customer.activeVisitTarget > 0 && <p>Current target: {customer.activeVisitTarget} visits. A cycle already in progress keeps its existing target and reward.</p>}</Panel>}
-    {result && <Panel title="Generated reward"><div className="flex flex-col gap-5 md:flex-row"><img src={result.qrImage} alt="Reward verification QR code" width={260} height={260} /><div className="space-y-3 break-all"><p>Order: {result.orderId}</p><p>Expires: {date(result.expiresAt)}</p><a className="text-primary underline" href={result.verifyUrl} target="_blank" rel="noreferrer">{result.verifyUrl}</a><p className="text-xs text-muted-foreground">Opening the verification link redeems the reward.</p><div className="flex flex-wrap gap-2"><Button disabled={sharing} onClick={() => imageAction("download")}>Download image</Button><Button disabled={sharing} variant="outline" onClick={() => imageAction("copy")}>Copy image</Button><Button disabled={sharing} variant="outline" onClick={() => imageAction("share")}>Share image</Button><Button variant="outline" asChild><a href={`https://api.whatsapp.com/send?phone=${encodeURIComponent(result.phone || "")}&text=${encodeURIComponent(message)}`} target="_blank" rel="noreferrer">Share on WhatsApp</a></Button></div></div></div></Panel>}
+    {result && <Panel title="Generated reward"><div className="flex flex-col gap-5 md:flex-row"><img src={result.qrImage} alt="Reward verification QR code" width={260} height={260} /><div className="space-y-3 break-all"><p>Order: {result.orderId}</p><p>Expires: {date(result.expiresAt)}</p><a className="text-primary underline" href={result.verifyUrl} target="_blank" rel="noreferrer">{result.verifyUrl}</a><p className="text-xs text-muted-foreground">Opening the verification link redeems the reward.</p><RewardShare row={result} link={result.verifyUrl} settings={settings} /></div></div></Panel>}
   </>;
 }
 
-function Records({ options, busy, run }: ToolProps & { options: Row[] }) {
+function Records({ options, settings, busy, run }: ToolProps & { options: Row[]; settings: Row }) {
   const [status, setStatus] = useState(""); const [search, setSearch] = useState(""); const [offset, setOffset] = useState(0);
   const [editing, setEditing] = useState<Row | null>(null);
+  const [viewing, setViewing] = useState<Row | null>(null);
   const query = useQuery({ queryKey: ["qr-admin", "records", status, search, offset], queryFn: () => qrApi({ action: "list_rewards", status, search, offset }) });
-  function edit(row: Row) { setEditing({ ...blankReward, ...row, rewardMode: row.rewardConfig?.mode || "discount", discountType: row.rewardConfig?.discountType || "percentage", discountValue: row.rewardConfig?.discountValue || 10, visitTarget: row.rewardConfig?.visitTarget || 5, rewardOption: row.rewardConfig?.rewardOption || "", expiresAt: localDate(row.expiresAt) }); }
+  function edit(row: Row) { setEditing({ ...blankReward, ...row, rewardMode: row.rewardConfig?.mode || "discount", discountType: row.rewardConfig?.discountType || "percentage", discountValue: row.rewardConfig?.discountValue || 10, visitTarget: row.rewardConfig?.visitTarget || 5, rewardOption: row.rewardConfig?.rewardOption || "", expiresAt: localDate(isExpired(row) ? new Date(Date.now() + Number(settings?.expiryDays || 30) * 86400000).toISOString() : row.expiresAt) }); setViewing(null); }
   async function save(event: FormEvent) {
     event.preventDefault(); if (!editing) return;
+    if (new Date(editing.expiresAt).getTime() <= Date.now()) { toast.error("Choose an expiry date in the future."); return; }
     const { code, orderId, customerName = "", phone = "", source = "manual", expiresAt, rewardMode, discountType, discountValue, visitTarget, rewardOption } = editing;
     if (await run({ action: "save_reward", data: { code, orderId, customerName, phone, source, expiresAt: new Date(expiresAt).toISOString(), rewardConfig: { mode: rewardMode, discountType, discountValue, visitTarget, rewardOption } } }, "Reward updated")) setEditing(null);
   }
   return <>
     <Panel title="QR codes waiting to be scanned"><div className="flex flex-wrap gap-3"><Field label="Status"><Pick value={status} onChange={v => { setStatus(v); setOffset(0); }} options={[["", "All statuses"], ...["pending", "verified", "redeeming", "cancelled"].map((value): [string, string] => [value, value])]} /></Field><Field label="Exact order ID, code or phone"><Input value={search} onChange={e => { setSearch(e.target.value); setOffset(0); }} /></Field></div>
       {query.error && <p role="alert">{query.error.message}</p>}{query.isLoading && <p>Loading…</p>}
-      <Table headings={["Order / customer", "Reward", "Status", "Expiry", "Actions"]}>{query.data?.records.map((row: Row) => <tr key={row.code}><td>{row.orderId}<p>{row.customerName} {row.phone}</p><small className="break-all text-muted-foreground">{row.code}</small></td><td>{row.rewardConfig?.mode === "visits" ? `${row.rewardConfig.visitTarget} visits` : `${row.rewardConfig?.discountValue || 10}${row.rewardConfig?.discountType === "price" ? " INR" : "%"}`}<p>{row.rewardConfig?.rewardOptionLabel}</p></td><td>{row.status}</td><td>{date(row.expiresAt)}</td><td><div className="flex flex-wrap gap-2">{row.status === "pending" && <><Button size="sm" variant="outline" disabled={busy} onClick={() => edit(row)}>Edit</Button><Button size="sm" variant="outline" disabled={busy} onClick={() => { if (window.confirm("Cancel this reward? Its QR will no longer redeem.")) run({ action: "cancel_reward", code: row.code }, "Reward cancelled"); }}>Cancel</Button></>}<Button size="sm" variant="destructive" disabled={busy || row.status === "redeeming"} onClick={() => { if (window.confirm("Permanently delete this reward record?")) run({ action: "delete_reward", code: row.code }, "Reward deleted"); }}>Delete</Button></div></td></tr>)}</Table>
+      <Table headings={["QR code", "Order / customer", "Reward", "Status", "Expiry", "Actions"]}>{query.data?.records.map((row: Row) => <tr key={row.code}><td><button type="button" className="block" onClick={() => setViewing(row)} aria-label={`Show the QR code for ${row.orderId}`}><QrImage url={verifyLink(row, settings)} size={72} label={`QR code for ${row.orderId}`} /></button></td><td>{row.orderId}<p>{row.customerName} {row.phone ? formatPhone(plus(row.phone)) : ""}</p><small className="break-all text-muted-foreground">{row.code}</small></td><td>{row.rewardConfig?.mode === "visits" ? `${row.rewardConfig.visitTarget} visits` : `${row.rewardConfig?.discountValue || 10}${row.rewardConfig?.discountType === "price" ? " INR" : "%"}`}<p>{row.rewardConfig?.rewardOptionLabel}</p></td><td>{isExpired(row) ? "pending, expired" : row.status}</td><td>{date(row.expiresAt)}</td><td><div className="flex flex-wrap gap-2">{row.status === "pending" && <><Button size="sm" variant="outline" disabled={busy} onClick={() => edit(row)}>Edit</Button><Button size="sm" variant="outline" disabled={busy} onClick={() => { if (window.confirm("Cancel this reward? Its QR will no longer redeem.")) run({ action: "cancel_reward", code: row.code }, "Reward cancelled"); }}>Cancel</Button></>}<Button size="sm" variant="destructive" disabled={busy || row.status === "redeeming"} onClick={() => { if (window.confirm("Permanently delete this reward record?")) run({ action: "delete_reward", code: row.code }, "Reward deleted"); }}>Delete</Button></div></td></tr>)}</Table>
       {query.data?.records.length === 0 && <p>No matching rewards. Redeemed records may have been deleted by the retention setting.</p>}
       <div className="flex gap-2"><Button variant="outline" disabled={offset === 0} onClick={() => setOffset(offset - 50)}>Previous</Button><Button variant="outline" disabled={!query.data?.hasMore} onClick={() => setOffset(offset + 50)}>Next</Button></div>
     </Panel>
-    {editing && <Panel title="Edit pending reward"><p className="text-sm text-muted-foreground">The QR verification URL stays the same. Customer history already recorded when the QR was generated is retained.</p><form onSubmit={save} className="grid gap-4 md:grid-cols-2"><RewardFields form={editing} setForm={setEditing} options={options} /><div className="flex gap-2"><Button disabled={busy}>Save reward</Button><Button type="button" variant="outline" onClick={() => setEditing(null)}>Close</Button></div></form></Panel>}
+    <Dialog open={editing !== null} onOpenChange={open => !open && setEditing(null)}>
+      <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
+        <DialogHeader><DialogTitle>Edit pending reward</DialogTitle><DialogDescription>The QR verification link stays the same, so a printed or sent QR keeps working. Customer history already recorded is kept.</DialogDescription></DialogHeader>
+        {editing && <form onSubmit={save} className="grid gap-4 md:grid-cols-2">
+          <div className="flex items-center gap-4 md:col-span-2"><QrImage url={verifyLink(editing, settings)} size={96} label="QR code for this reward" /><div className="min-w-0 text-sm"><p className="font-medium">{editing.orderId}</p><p className="break-all text-xs text-muted-foreground">{verifyLink(editing, settings)}</p>{isExpired(editing) || new Date(editing.expiresAt).getTime() <= Date.now() ? <p className="mt-1 text-xs text-destructive">This QR has expired. Choose a new expiry below to make it work again.</p> : null}<div className="mt-2"><RewardShare row={{ ...editing, phone: editing.phone }} link={verifyLink(editing, settings)} settings={settings} /></div></div></div>
+          <RewardFields form={editing} setForm={setEditing} options={options} />
+          <div className="flex gap-2 md:col-span-2"><Button disabled={busy}>Save reward</Button><Button type="button" variant="outline" onClick={() => setEditing(null)}>Close</Button></div>
+        </form>}
+      </DialogContent>
+    </Dialog>
+    <Dialog open={viewing !== null} onOpenChange={open => !open && setViewing(null)}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader><DialogTitle>QR code</DialogTitle><DialogDescription>{viewing?.orderId}{viewing?.customerName ? `, ${viewing.customerName}` : ""}</DialogDescription></DialogHeader>
+        {viewing && <div className="space-y-3 text-center">
+          <div className="flex justify-center"><QrImage url={verifyLink(viewing, settings)} size={256} label={`QR code for ${viewing.orderId}`} /></div>
+          <p className="break-all text-xs text-muted-foreground">{verifyLink(viewing, settings)}</p>
+          <div className="flex flex-col items-center gap-2">
+            <RewardShare row={viewing} link={verifyLink(viewing, settings)} settings={settings} />
+            {viewing.status === "pending" && <Button type="button" size="sm" onClick={() => edit(viewing)}>Edit</Button>}
+          </div>
+        </div>}
+      </DialogContent>
+    </Dialog>
   </>;
 }
 
@@ -257,7 +317,7 @@ function Customers({ busy, run }: ToolProps) {
       <div className="flex gap-2"><Button variant="outline" disabled={!offset} onClick={() => setOffset(offset - 50)}>Previous</Button><Button variant="outline" disabled={query.data?.customers.length !== 50} onClick={() => setOffset(offset + 50)}>Next</Button></div>
     </Panel>
     {editing && <Panel title={`Edit customer ${editing.phone}`}><form onSubmit={save} className="grid gap-4 md:grid-cols-2">{[["customerName", "Customer name"], ["visitCount", "Visits in current cycle"], ["totalVisits", "Total visits"], ["activeVisitTarget", "Current visit target (0 for none)"]].map(([key, label]) => <Field key={key} label={label}><Input type={key === "customerName" ? "text" : "number"} min={0} required={key !== "customerName"} value={editing[key]} onChange={e => setEditing({ ...editing, [key]: e.target.value })} /></Field>)}<p className="text-sm text-muted-foreground md:col-span-2">Visit corrections do not grant rewards or alter existing reward history.</p><div className="flex gap-2"><Button disabled={busy}>Save customer</Button><Button variant="outline" type="button" onClick={() => setEditing(null)}>Close</Button></div></form></Panel>}
-    {history && <Panel title={`History for ${history.customerName || history.phone}`}><p>Member since {date(history.memberSince)} · {history.rewardsUnlocked || 0} rewards unlocked</p><h3 className="font-medium">Recent orders and QR codes</h3><Table headings={["Order", "Source", "Generated"]}>{(history.qrHistory || []).map((row: Row, i: number) => <tr key={i}><td>{row.orderId}</td><td>{row.source}</td><td>{date(row.generatedAt)}</td></tr>)}</Table><h3 className="font-medium">Unlocked rewards</h3><Table headings={["Order", "Reward", "Date"]}>{(history.rewardHistory || []).map((row: Row, i: number) => <tr key={i}><td>{row.orderId}</td><td>{row.reward}</td><td>{date(row.unlockedAt)}</td></tr>)}</Table><Button variant="outline" onClick={() => setHistory(null)}>Close history</Button></Panel>}
+    {history && <Panel title={`History for ${history.customerName || history.phone}`}><p>Member since {date(history.memberSince)} · {history.rewardsUnlocked || 0} reward{(history.rewardsUnlocked || 0) === 1 ? "" : "s"} given</p><h3 className="font-medium">Recent orders and QR codes</h3><Table headings={["Order", "Source", "Generated", "Redeemed?"]}>{(history.qrHistory || []).map((row: Row, i: number) => <tr key={i}><td>{row.orderId}</td><td>{row.source}</td><td>{date(row.generatedAt)}</td><td><QrState row={row} /></td></tr>)}</Table><h3 className="font-medium">Rewards given (each scan)</h3><Table headings={["Order", "Reward", "How", "Date"]}>{[...(history.rewardHistory || [])].reverse().map((row: Row, i: number) => <tr key={i}><td>{row.orderId}</td><td>{row.reward}</td><td>{row.mode === "visits" ? `Unlocked after ${row.visitTarget} visits` : "Scanned QR"}</td><td>{date(row.unlockedAt)}</td></tr>)}</Table>{!(history.rewardHistory || []).length && <p className="text-sm text-muted-foreground">No rewards given yet. A reward is listed here each time a QR is scanned.</p>}<Button variant="outline" onClick={() => setHistory(null)}>Close history</Button></Panel>}
   </>;
 }
 
@@ -273,7 +333,7 @@ function Options({ rows, busy, run }: ToolProps & { rows: Row[] }) {
 function Settings({ initial, busy, run }: ToolProps & { initial: Row }) {
   const [form, setForm] = useState<Row>(initial);
   async function save(event: FormEvent) { event.preventDefault(); await run({ action: "save_settings", data: { ...form, expiryDays: Number(form.expiryDays), maxRecords: Number(form.maxRecords) } }, "Settings saved"); }
-  return <Panel title="Settings"><form onSubmit={save} className="grid gap-4 md:grid-cols-2"><Field label="Default expiry (days)"><Input required type="number" min={1} max={365} value={form.expiryDays} onChange={e => setForm({ ...form, expiryDays: e.target.value })} /></Field><Field label="Maximum stored QR records"><Input required type="number" min={1} max={100000} value={form.maxRecords} onChange={e => setForm({ ...form, maxRecords: e.target.value })} /></Field><Check label="Delete QR record after successful redemption" checked={form.deleteOnVerify} onChange={deleteOnVerify => setForm({ ...form, deleteOnVerify })} /><p className="text-xs text-muted-foreground">Turn this off to retain redeemed records until cleanup. Customer visit history is retained either way.</p>{[["publicBaseUrl", "Public QR base URL (optional)"], ["zomatoUrl", "Zomato ordering URL"], ["swiggyUrl", "Swiggy ordering URL"]].map(([key, label]) => <Field key={key} label={label}><Input type="url" required={key !== "publicBaseUrl"} value={form[key]} onChange={e => setForm({ ...form, [key]: e.target.value })} /></Field>)}<div className="md:col-span-2"><Field label="Reward WhatsApp sharing message"><textarea required rows={4} className={inputClass} value={form.shareMessage} onChange={e => setForm({ ...form, shareMessage: e.target.value })} /></Field><p className="mt-1 text-xs text-muted-foreground">Available placeholders: {"{customerName}, {orderId}, {verifyUrl}, {reward}"}. The campaign message editor controls messages from campaign QR scans.</p></div><div><Button disabled={busy}>Save settings</Button></div></form></Panel>;
+  return <Panel title="Settings"><form onSubmit={save} className="grid gap-4 md:grid-cols-2"><Field label="Default expiry (days)"><Input required type="number" min={1} max={365} value={form.expiryDays} onChange={e => setForm({ ...form, expiryDays: e.target.value })} /></Field><Field label="Maximum stored QR records"><Input required type="number" min={1} max={100000} value={form.maxRecords} onChange={e => setForm({ ...form, maxRecords: e.target.value })} /></Field><Check label="Delete QR record after successful redemption" checked={form.deleteOnVerify} onChange={deleteOnVerify => setForm({ ...form, deleteOnVerify })} /><Check label="Anyone can redeem a reward by opening its link" checked={form.publicScan !== false} onChange={publicScan => setForm({ ...form, publicScan })} /><p className="text-xs text-muted-foreground">On: the customer scanning their own QR with their phone redeems it. Off: opening the link does nothing except tell them to show the QR to staff; only the people given the <strong>Loyalty rewards</strong> role (and administrators) can redeem it, with the <a className="underline" href="/admin/loyalty-scan">reward scanner</a> in the staff portal.</p><p className="text-xs text-muted-foreground">Turn this off to retain redeemed records until cleanup. Customer visit history is retained either way.</p>{[["publicBaseUrl", "Public QR base URL (optional)"], ["zomatoUrl", "Zomato ordering URL"], ["swiggyUrl", "Swiggy ordering URL"]].map(([key, label]) => <Field key={key} label={label}><Input type="url" required={key !== "publicBaseUrl"} value={form[key]} onChange={e => setForm({ ...form, [key]: e.target.value })} /></Field>)}<div className="md:col-span-2"><Field label="Reward WhatsApp sharing message"><textarea required rows={4} className={inputClass} value={form.shareMessage} onChange={e => setForm({ ...form, shareMessage: e.target.value })} /></Field><p className="mt-1 text-xs text-muted-foreground">Available placeholders: {"{customerName}, {orderId}, {verifyUrl}, {reward}"}. The campaign message editor controls messages from campaign QR scans.</p></div><div><Button disabled={busy}>Save settings</Button></div></form></Panel>;
 }
 function Cleanup({ busy, run }: ToolProps) {
   const [result, setResult] = useState<Row | null>(null);

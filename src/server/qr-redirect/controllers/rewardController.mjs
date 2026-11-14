@@ -13,6 +13,8 @@ import {
   getRewardStatusParams,
   getRewardVerifyParams
 } from '../utils/rewardUtils.mjs'
+import { renderRewardPage } from '../views/rewardPage.mjs'
+import { getSettings } from '../settings.mjs'
 
 export async function createRewardQr(req, res) {
   try {
@@ -23,11 +25,30 @@ export async function createRewardQr(req, res) {
   }
 }
 
+/** A browser opening the QR link gets a readable page; anything else (the admin tools, tests, scripts) gets JSON as before. */
+const wantsPage = req => String(req.headers?.accept || '').includes('text/html') && !String(req.url || '').includes('format=json')
+
 export async function verifyRewardQr(req, res) {
   try {
+    // When scanning from anywhere is switched off, opening the link does not redeem it: staff use the scanner.
+    if (!(await getSettings()).publicScan) {
+      if (wantsPage(req)) {
+        res.setHeader('Content-Type', 'text/html; charset=utf-8')
+        return res.status(403).send(renderRewardPage({ staffOnly: true }))
+      }
+      return res.status(403).json({ error: 'This reward can only be redeemed by our staff. Please show the QR to them.' })
+    }
     const payload = await verifyRewardQrCode(getRewardVerifyParams(req))
+    if (wantsPage(req)) {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8')
+      return res.status(200).send(renderRewardPage({ data: payload }))
+    }
     return res.status(200).json({ success: true, data: payload })
   } catch (error) {
+    if (wantsPage(req)) {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8')
+      return res.status(error.statusCode || 500).send(renderRewardPage({ error: error.statusCode ? error.message : 'Unable to open this reward', statusCode: error.statusCode || 500 }))
+    }
     return sendRewardError(error, res, 'Unable to verify reward QR code')
   }
 }

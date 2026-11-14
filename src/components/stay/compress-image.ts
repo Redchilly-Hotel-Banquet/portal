@@ -48,3 +48,24 @@ export async function compressImage(file: File): Promise<CompressedImage> {
     type: "image/jpeg",
   };
 }
+
+/** Turns a photo a quarter turn (clockwise by default), for a document photographed sideways. Returns a new JPEG. */
+export async function rotateImage(dataUrl: string, name: string, clockwise = true): Promise<CompressedImage> {
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error("That photo could not be turned."));
+    el.src = dataUrl;
+  });
+  const canvas = document.createElement("canvas");
+  canvas.width = img.naturalHeight;
+  canvas.height = img.naturalWidth;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Image processing is not supported in this browser.");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.translate(canvas.width / 2, canvas.height / 2);
+  ctx.rotate(((clockwise ? 90 : -90) * Math.PI) / 180);
+  ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+  return { dataUrl: canvas.toDataURL("image/jpeg", QUALITY), name: name.replace(/\.[^.]+$/, "") + ".jpg", type: "image/jpeg" };
+}
