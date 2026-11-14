@@ -1,5 +1,6 @@
 "use client";
 
+import { useDocumentTypes } from "@/hooks/useDocumentTypes";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -36,6 +37,8 @@ export function useCheckinManager(booking: Booking | null) {
   const [contactPhone, setContactPhone] = useState("");
   const [contactEmail, setContactEmail] = useState("");
 
+  // Which documents are accepted, and how many photos each needs (this also keeps the completeness checks up to date).
+  const documentTypes = useDocumentTypes();
   const rulesQuery = useQuery({
     queryKey: ["checkin-rules"],
     queryFn: () => apiPost<{ checkin_rule_sets?: unknown }>("/admin/config", { action: "get" }, true),
@@ -98,7 +101,7 @@ export function useCheckinManager(booking: Booking | null) {
   const hasPhone = Boolean(contactPhone.trim() || guests.some((guest) => guest.phone.trim()));
   const hasEmail = Boolean(contactEmail.trim());
   const contactError = optionalPhoneError(contactPhone) || (contactEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail.trim()) ? "Enter a valid email address, or leave it blank." : null);
-  const issues = useMemo(() => completionIssues(guests, booked, selectedRooms.length, { phone: hasPhone, email: hasEmail }, rules), [guests, booked, selectedRooms, hasPhone, hasEmail, rules]);
+  const issues = useMemo(() => completionIssues(guests, booked, selectedRooms.length, { phone: hasPhone, email: hasEmail }, rules), [guests, booked, selectedRooms, hasPhone, hasEmail, rules, documentTypes]);
 
   const updateGuest = useCallback((key: string, patch: Partial<AdminGuest>) => {
     setGuests((prev) => prev.map((guest) => (guest.key === key ? { ...guest, ...patch } : guest)));

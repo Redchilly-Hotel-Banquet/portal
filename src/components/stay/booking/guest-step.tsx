@@ -2,6 +2,7 @@
 
 import type { Dispatch } from "react";
 import { Input } from "@/components/ui/input";
+import { PhoneInput } from "@/components/ui/phone-input";
 import { Textarea } from "@/components/ui/textarea";
 import { Field, fieldDescribedBy } from "../field";
 import type { BookingAction, BookingFormState, BookingStepErrors } from "./use-booking-form";
@@ -29,17 +30,7 @@ export function GuestStep({ state, dispatch, errors }: GuestStepProps) {
         />
       </Field>
       <Field id="guest-phone" label="Phone number" required error={errors.phone} hint="The front desk may call to confirm.">
-        <Input
-          id="guest-phone"
-          type="tel"
-          inputMode="tel"
-          autoComplete="tel"
-          placeholder="+91 98765 43210"
-          value={state.phone}
-          onChange={(e) => set("phone")(e.target.value)}
-          aria-invalid={!!errors.phone}
-          aria-describedby={fieldDescribedBy("guest-phone", !!errors.phone, true)}
-        />
+        <PhoneInput id="guest-phone" invalid={!!errors.phone} value={state.phone} onChange={(v) => set("phone")(v)} />
       </Field>
       <Field id="guest-email" label="Email" optional error={errors.email} className="sm:col-span-2">
         <Input

@@ -1,5 +1,6 @@
 "use client";
 
+import { formatPhone } from "@/lib/phone";
 import { useQuery } from "@tanstack/react-query";
 import { formatDate, formatINR, formatNumber } from "@/components/admin/format";
 import { StatCard } from "@/components/admin/stat-card";
@@ -57,7 +58,7 @@ export function AccountInfoSheet({ account, onClose }: { account: InfoTarget | n
         <SheetHeader className="text-left">
           <SheetTitle>{account?.name || account?.email}</SheetTitle>
           <SheetDescription>
-            {[account?.email, account?.kind === "guest" ? (data?.user.phone || account.phone) : ""].filter(Boolean).join(" · ")}
+            {[account?.email, account?.kind === "guest" ? formatPhone(data?.user.phone || account.phone) : ""].filter(Boolean).join(" · ")}
             {account?.kind === "guest" ? " · No Google account" : ""}
             {data?.since ? ` · Joined ${formatDate(data.since)}` : ""}
           </SheetDescription>

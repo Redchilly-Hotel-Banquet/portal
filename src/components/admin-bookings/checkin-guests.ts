@@ -1,5 +1,7 @@
 import { DOCUMENT_TYPES } from "@/components/stay/checkin/types";
-import { optionalPhoneError, tenDigitPhone } from "@/lib/phone";
+import { photoCountFor, photoSpecsOf } from "@/lib/document-types";
+import { extraImagePayload, hasAllPhotos, type SideImage } from "@/lib/document-photos";
+import { normalisePhone, optionalPhoneError } from "@/lib/phone";
 import { DEFAULT_CHECKIN_RULES, type CheckinRules } from "@/lib/checkin-rules";
 import type { CheckinContext, CheckinGuest } from "./types";
 
@@ -18,6 +20,8 @@ export type AdminGuest = {
   imageDataUrl: string;
   imageName: string;
   imageType: string;
+  /** The photos after the first (the back of a card, …). */
+  extraImages: SideImage[];
   signature: string;
   /** Index in the saved record; null for guests added in this session. */
   savedIndex: number | null;
@@ -33,6 +37,8 @@ export type GuestPayload = {
   documentImageDataUrl?: string;
   documentImageName?: string;
   documentImageType?: string;
+  /** Photos after the first, in order; null for one that has not changed. */
+  documentExtraImages?: Array<{ dataUrl: string; name: string; type: string } | null>;
   signatureDataUrl?: string;
 };
 
@@ -48,6 +54,7 @@ export const blankGuest = (): AdminGuest => ({
   imageDataUrl: "",
   imageName: "",
   imageType: "",
+  extraImages: [],
   signature: "",
   savedIndex: null,
   savedImage: "",
@@ -63,12 +70,13 @@ export function seedGuests(context: CheckinContext): AdminGuest[] {
   const guests: AdminGuest[] = stored.map((guest, index) => ({
     key: nextKey(),
     fullName: guest.full_name ?? "",
-    phone: guest.phone ?? (index === 0 ? tenDigitPhone(context.booking?.guest_phone) ?? "" : ""),
+    phone: guest.phone ?? (index === 0 ? normalisePhone(context.booking?.guest_phone) ?? "" : ""),
     documentType: guest.document_type || DEFAULT_DOCUMENT_TYPE,
     documentNumber: guest.document_number ?? "",
     imageDataUrl: guest.document_image?.data_url ?? "",
     imageName: guest.document_image?.file_name ?? "",
     imageType: guest.document_image?.mime_type ?? "",
+    extraImages: (guest.document_images ?? []).slice(1).map((file) => ({ dataUrl: file?.data_url ?? "", name: file?.file_name ?? "", type: file?.mime_type ?? "", saved: file?.data_url ?? "" })),
     signature: guest.signature_image?.data_url ?? "",
     savedIndex: index,
     savedImage: guest.document_image?.data_url ?? "",
@@ -80,7 +88,7 @@ export function seedGuests(context: CheckinContext): AdminGuest[] {
     while (guests.length < bookedGuestCount(context)) {
       guests.push(
         guests.length === 0
-          ? { ...blankGuest(), fullName: bookedName, phone: tenDigitPhone(context.booking?.guest_phone) ?? "" }
+          ? { ...blankGuest(), fullName: bookedName, phone: normalisePhone(context.booking?.guest_phone) ?? "" }
           : blankGuest(),
       );
     }
@@ -93,7 +101,7 @@ export const hasDetails = (guest: AdminGuest, rules: CheckinRules = DEFAULT_CHEC
   !optionalPhoneError(guest.phone) &&
   Boolean(guest.fullName.trim()) &&
   (!rules.document_number || Boolean(guest.documentNumber.trim())) &&
-  (!rules.document_photo || Boolean(guest.imageDataUrl));
+  (!rules.document_photo || hasAllPhotos(guest, photoSpecsOf(guest.documentType)));
 
 export const isGuestComplete = (guest: AdminGuest, rules: CheckinRules = DEFAULT_CHECKIN_RULES): boolean =>
   hasDetails(guest, rules) && (!rules.signature || Boolean(guest.signature));
@@ -102,7 +110,7 @@ export type Completeness = "complete" | "missing-details" | "missing-photo" | "m
 
 export function guestStatus(guest: AdminGuest, rules: CheckinRules = DEFAULT_CHECKIN_RULES): Completeness {
   if (!guest.fullName.trim() || (rules.document_number && !guest.documentNumber.trim())) return "missing-details";
-  if (rules.document_photo && !guest.imageDataUrl) return "missing-photo";
+  if (rules.document_photo && !hasAllPhotos(guest, photoSpecsOf(guest.documentType))) return "missing-photo";
   if (rules.signature && !guest.signature) return "missing-signature";
   return "complete";
 }
@@ -139,6 +147,8 @@ export function buildGuestPayload(guests: AdminGuest[]): GuestPayload[] {
       item.documentImageName = guest.imageName || `guest-${index + 1}-id.jpg`;
       item.documentImageType = guest.imageType || "image/jpeg";
     }
+    const extras = extraImagePayload(guest, photoCountFor(guest.documentType), moved);
+    if (extras) item.documentExtraImages = extras;
     if (guest.signature && (moved || guest.signature !== guest.savedSignature)) {
       item.signatureDataUrl = guest.signature;
     }
@@ -147,4 +157,4 @@ export function buildGuestPayload(guests: AdminGuest[]): GuestPayload[] {
 }
 
 export const payloadSize = (items: GuestPayload[]): number =>
-  items.reduce((sum, item) => sum + (item.documentImageDataUrl?.length ?? 0) + (item.signatureDataUrl?.length ?? 0), 0);
+  items.reduce((sum, item) => sum + (item.documentImageDataUrl?.length ?? 0) + (item.documentExtraImages ?? []).reduce((n, image) => n + (image?.dataUrl.length ?? 0), 0) + (item.signatureDataUrl?.length ?? 0), 0);

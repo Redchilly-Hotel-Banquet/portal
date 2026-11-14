@@ -83,6 +83,15 @@ export function useCreateBooking(onDone?: (data: BookingResponse | undefined) =>
   });
 }
 
+export function useDiscardNewBooking() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiPost<{ success: boolean }>("/admin/bookings/manage", { action: "discard_new", id }, true),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: BOOKINGS_KEY }),
+    onError: (error) => toast.error(errorMessage(error, "Unable to go back")),
+  });
+}
+
 export function useCheckout() {
   const queryClient = useQueryClient();
   return useMutation({

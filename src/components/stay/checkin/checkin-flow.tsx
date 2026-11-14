@@ -1,5 +1,7 @@
 "use client";
 
+import { photoCountFor } from "@/lib/document-types";
+import { extraImagePayload } from "@/lib/document-photos";
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ArrowLeft, ArrowRight, Loader2, Send } from "lucide-react";
@@ -178,6 +180,7 @@ export function CheckinFlow() {
           documentImageDataUrl: imageUnchanged ? undefined : guest.imageDataUrl,
           documentImageName: imageUnchanged ? undefined : guest.imageName,
           documentImageType: imageUnchanged ? undefined : guest.imageType,
+          documentExtraImages: extraImagePayload(guest, photoCountFor(guest.documentType), !sameSlot),
           signatureDataUrl: signatureUnchanged ? undefined : guest.signature,
         };
       }),

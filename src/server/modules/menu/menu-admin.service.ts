@@ -6,6 +6,8 @@ import { parseImageDataUrl, r2 } from "../../storage/r2";
 import type { AuthenticatedUser } from "../../session";
 import { assertAdmin, assertOutlet, isAdmin, outletFilter } from "../../utils/access";
 import { ObjectId } from "mongodb";
+import { outletDirectory, outletKeyOf } from "../../utils/outlets";
+import { categoryNames } from "../../utils/menuRefs";
 
 type ManageMenuItemRequest = {
   action?: "list" | "create" | "update" | "delete";
@@ -46,9 +48,20 @@ const sanitise = (data: Record<string, unknown>, requireCore: boolean) => {
     out.base_price = price;
   }
 
-  for (const key of ["description", "category", "image_url", "category_id", "outlet_id"] as const) {
+  for (const key of ["description", "image_url"] as const) {
     const value = text(data[key]);
     if (value !== undefined) out[key] = value;
+  }
+  // The category and the branch are links by _id. (The category's name is not stored on the item.)
+  if (data.category_id !== undefined) {
+    const id = toObjectId(text(data.category_id));
+    if (!id) throw new HttpError(400, "Choose a valid category");
+    out.category_id = id;
+  }
+  if (data.outlet_id !== undefined) {
+    const id = outletDirectory.idOf(text(data.outlet_id));
+    if (!id) throw new HttpError(400, "Choose a valid branch");
+    out.outlet_id = id;
   }
   if (requireCore && (!out.category_id || !out.outlet_id)) {
     throw new HttpError(400, "Category and outlet are required");
@@ -76,12 +89,12 @@ const storeImage = async (itemId: Id, value: string): Promise<string> => {
   return r2.publicUrl(key);
 };
 
-const present = (doc: Record<string, unknown>) => {
+const present = (doc: Record<string, unknown>, names: Map<string, string>) => {
   const item = normalizeDocument(doc) as Record<string, unknown>;
   item.price = item.price ?? item.base_price ?? 0;
-  for (const key of ["category_id", "outlet_id"]) {
-    if (item[key]) item[key] = stringifyId(item[key]) ?? item[key];
-  }
+  if (item.category_id) item.category_id = stringifyId(item.category_id) ?? item.category_id;
+  if (item.outlet_id) item.outlet_id = outletKeyOf(item.outlet_id) ?? item.outlet_id;
+  item.category = names.get(String(doc.category_id ?? "")) ?? "";
   return item;
 };
 
@@ -92,7 +105,8 @@ export const menuAdminService = {
     switch (request.action) {
       case "list": {
         const docs = await collection.find(outletFilter(user)).sort({ created_at: -1 }).toArray();
-        const items = docs.map(present);
+        const names = await categoryNames(mongoConnection.getDb());
+        const items = docs.map((doc) => present(doc, names));
         return { items, page: 1, pageSize: items.length, total: items.length, totalPages: 1 };
       }
       case "create": {
@@ -104,7 +118,7 @@ export const menuAdminService = {
         if (typeof data.image_url === "string") data.image_url = await storeImage(_id, data.image_url);
         const doc = { _id, is_available: true, is_veg: true, ...data, created_at: now, updated_at: now };
         const result = await collection.insertOne(doc);
-        return present({ _id: result.insertedId, ...doc });
+        return present({ _id: result.insertedId, ...doc }, await categoryNames(mongoConnection.getDb()));
       }
       case "update": {
         if (!request.id) throw new HttpError(400, "id is required for update action");

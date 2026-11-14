@@ -11,8 +11,8 @@ import { BookingsTable } from "./bookings-table";
 import { CheckinDialog } from "./checkin-dialog";
 import { CreateBookingDialog } from "./create-booking-dialog";
 import { InvoiceDialog } from "./invoice-dialog";
-import type { BillingSummary, Booking } from "./types";
-import { useBookingsQuery, useOutletsQuery } from "./use-bookings";
+import type { BillingSummary, Booking, CreateBookingForm } from "./types";
+import { useBookingsQuery, useDiscardNewBooking, useOutletsQuery } from "./use-bookings";
 import { errorMessage, overlapsRange, searchHaystack } from "./utils";
 
 export function BookingsConsole() {
@@ -23,6 +23,9 @@ export function BookingsConsole() {
   const [checkinTarget, setCheckinTarget] = useState<Booking | null>(null);
   const [invoice, setInvoice] = useState<BillingSummary | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  // Set while check-in is open straight after creating a reservation: what was entered, so Back can restore it.
+  const [draft, setDraft] = useState<{ bookingId: string; form: CreateBookingForm } | null>(null);
+  const discard = useDiscardNewBooking();
 
   const bookings = bookingsQuery.data?.bookings;
   // Staff assigned to some branches can only make bookings in those.
@@ -68,7 +71,7 @@ export function BookingsConsole() {
           >
             <RefreshCw className={`h-4 w-4 ${bookingsQuery.isFetching ? "animate-spin" : ""}`} strokeWidth={1.75} aria-hidden />
           </Button>
-          <Button onClick={() => setCreateOpen(true)}>
+          <Button onClick={() => { setDraft(null); setCreateOpen(true); }}>
             <CalendarPlus className="mr-2 h-4 w-4" strokeWidth={1.75} aria-hidden />
             New reservation
           </Button>
@@ -106,9 +109,14 @@ export function BookingsConsole() {
         onManageCheckin={setCheckinTarget}
         onOpenInvoice={setInvoice}
       />
-      <CheckinDialog booking={checkinTarget} onClose={() => setCheckinTarget(null)} />
+      <CheckinDialog
+        booking={checkinTarget}
+        onClose={() => { setCheckinTarget(null); setDraft(null); }}
+        backBusy={discard.isPending}
+        onBack={draft && checkinTarget?.id === draft.bookingId ? () => discard.mutate(draft.bookingId, { onSuccess: () => { setCheckinTarget(null); setCreateOpen(true); } }) : undefined}
+      />
       <InvoiceDialog summary={invoice} open={invoice !== null} onOpenChange={(open) => !open && setInvoice(null)} />
-      <CreateBookingDialog open={createOpen} onOpenChange={setCreateOpen} outlets={outlets} defaultOutlet={filters.outlet} onCreated={setCheckinTarget} />
+      <CreateBookingDialog open={createOpen} onOpenChange={setCreateOpen} outlets={outlets} defaultOutlet={filters.outlet} initialForm={draft?.form} onCreated={(booking, form) => { setDraft({ bookingId: booking.id, form }); setCheckinTarget(booking); }} />
     </AdminShell>
   );
 }

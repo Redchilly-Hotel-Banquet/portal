@@ -1,3 +1,4 @@
+import { storeBookingRefs, storeExtensionRef } from "../../utils/bookingRefs";
 import type { Db } from "mongodb";
 import { HttpError } from "../../httpError";
 import type { AuthenticatedUser } from "../../session";
@@ -265,21 +266,20 @@ export const stayExtension = {
         $set: {
           check_out_date: to,
           nights: nightsBetween(new Date(booking.check_in_date), to),
-          stay_segments: segments,
+          ...storeBookingRefs({ stay_segments: segments }),
           total_amount: total,
           room_total: total,
-          room_ids: roomIds,
-          checkin_details: { ...details, assigned_rooms: assignedRooms },
+          ...storeBookingRefs({ room_ids: roomIds, checkin_details: { ...details, assigned_rooms: assignedRooms } }),
           updated_at: now,
         },
         $push: {
-          extensions: {
+          extensions: storeExtensionRef({
             at: now,
             by: { id: user.id, name: user.name },
             from_check_out: from,
             to_check_out: to,
             rooms: additions.map((segment) => ({ room_id: segment.room_id, code: segment.code, rate: segment.rate })),
-          },
+          }),
         } as any,
       },
     );
@@ -315,7 +315,7 @@ export const stayExtension = {
     if (String(booking.status).toUpperCase() === "CHECKED_OUT") throw new HttpError(409, "A checked-out stay cannot be changed.");
     const roomsById = new Map((await loadRooms(db, booking.outlet_id)).map((room) => [String(room._id), room as Record<string, any>]));
     const segments = legacySegments(booking, roomsById);
-    await db.collection("bookings").updateOne({ _id: booking._id }, { $set: { stay_segments: segments, updated_at: new Date() } });
+    await db.collection("bookings").updateOne({ _id: booking._id }, { $set: { ...storeBookingRefs({ stay_segments: segments }), updated_at: new Date() } });
     return db.collection("bookings").findOne({ _id: booking._id });
   },
 };

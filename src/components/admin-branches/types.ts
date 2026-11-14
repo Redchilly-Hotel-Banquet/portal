@@ -24,6 +24,8 @@ export type Branch = {
   /** "HH:mm"; empty means the default. */
   checkin_time: string;
   checkout_time: string;
+  /** "HH:mm" quoted in the WhatsApp message; empty means the same as checkin_time. */
+  message_checkin_time: string;
   sort_order: number | null;
   is_active: boolean;
 };
@@ -55,6 +57,7 @@ export function toBranch(raw: Record<string, unknown>): Branch | null {
     whatsapp_template: str(raw.whatsapp_template),
     checkin_time: str(raw.checkin_time),
     checkout_time: str(raw.checkout_time),
+    message_checkin_time: str(raw.message_checkin_time),
     floors_max: Number.isInteger(raw.floors_max) ? Number(raw.floors_max) : null,
     wifi_floors: Array.isArray(raw.wifi_floors)
       ? (raw.wifi_floors as Record<string, unknown>[]).map((row) => ({ floor: str(row?.floor), wifi_name: str(row?.wifi_name), wifi_password: str(row?.wifi_password) }))

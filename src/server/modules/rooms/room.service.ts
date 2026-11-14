@@ -1,4 +1,7 @@
 import { isKnownFloor } from "../../../lib/floors";
+import { outletDirectory } from "../../utils/outlets";
+import { withOutletKey } from "../../utils/menuRefs";
+import { stringifyId, toObjectIds } from "../../utils/objectId";
 import { assertAdmin, assertOutlet, isAdmin, outletFilter } from "../../utils/access";
 import { mongoConnection } from "../../mongo";
 import { assignedRoomIds, bookingViewForWindow } from "../../utils/roomAssignments";
@@ -77,7 +80,6 @@ const determineRoomsRequested = (booking: Record<string, unknown>, assignedCount
     {}) as { assigned_rooms?: unknown[] } | null;
   const counts = [
     Number(booking?.rooms_requested ?? 0),
-    Number(booking?.roomsRequested ?? 0),
     Array.isArray(booking?.preferred_room_ids) ? booking.preferred_room_ids.length : 0,
     Array.isArray(booking?.room_ids) ? booking.room_ids.length : 0,
     Array.isArray(booking?.rooms_allocated) ? booking.rooms_allocated.length : 0,
@@ -202,7 +204,7 @@ export const computePricingForRoom = (
       const roomIds = Array.isArray(rule.room_ids) ? rule.room_ids : [];
       if (roomIds.length === 0) return true;
       const roomId = room._id?.toString?.() ?? room._id;
-      return roomIds.includes(roomId) || roomIds.includes(String(roomId));
+      return roomIds.map((entry: unknown) => String(entry)).includes(String(roomId));
     });
 
     const isFixed = (rule: any) => String(rule.mode ?? "").toUpperCase() === "FIXED";
@@ -257,10 +259,13 @@ const normaliseRoomDocument = (doc: Record<string, unknown>) => {
 const sanitiseRoomPayload = (input: Record<string, unknown>) => {
   const now = new Date();
   const code = typeof input.code === "string" ? input.code.trim() : "";
-  const outletId = typeof input.outlet_id === "string" ? input.outlet_id.trim() : "";
-  if (!code || !outletId) {
+  // A branch arrives as its key (from a screen) or as the stored _id (when an existing room is re-saved).
+  const outletName = (typeof input.outlet_id === "string" ? input.outlet_id.trim() : stringifyId(input.outlet_id)) ?? "";
+  if (!code || !outletName) {
     throw new HttpError(400, "code and outlet_id are required");
   }
+  const outletId = outletDirectory.idOf(outletName);
+  if (!outletId) throw new HttpError(400, "Choose a valid branch");
 
   const type = typeof input.type === "string" ? input.type : "ROOM";
   const occupancyRaw = Number(input.occupancy ?? 0);
@@ -320,6 +325,8 @@ const sanitisePricingPayload = (rule: Record<string, unknown>) => {
   if (!rule?.outlet_id || typeof rule.outlet_id !== "string") {
     throw new HttpError(400, "outlet_id is required");
   }
+  const outletRef = outletDirectory.idOf(rule.outlet_id);
+  if (!outletRef) throw new HttpError(400, "Choose a valid branch");
 
   const now = new Date();
   const modeRaw = typeof rule.mode === "string" ? rule.mode.toUpperCase().trim() : "PERCENT";
@@ -339,8 +346,8 @@ const sanitisePricingPayload = (rule: Record<string, unknown>) => {
   }
 
   return {
-    outlet_id: rule.outlet_id,
-    room_ids: normaliseRoomIds(rule.room_ids),
+    outlet_id: outletRef,
+    room_ids: toObjectIds(normaliseRoomIds(rule.room_ids)),
     mode,
     percent_increase: Number(percentIncrease.toFixed(2)),
     fixed_rate: mode === "FIXED" ? Number(fixedRate.toFixed(2)) : undefined,
@@ -357,7 +364,7 @@ const sanitisePricingPayload = (rule: Record<string, unknown>) => {
 const assertFloor = async (db: import("mongodb").Db, outletId: unknown, level: unknown) => {
   const clean = typeof level === "string" ? level.trim() : "";
   if (!clean) return;
-  const outlet = await db.collection("outlets").findOne({ location_key: outletId } as Record<string, unknown>, { projection: { floors_max: 1 } });
+  const outlet = await db.collection("outlets").findOne({ _id: outletDirectory.idOf(outletId) ?? "no-such-branch" } as Record<string, unknown>, { projection: { floors_max: 1 } });
   if (!isKnownFloor((outlet?.floors_max as number | null | undefined) ?? null, clean)) {
     throw new HttpError(400, `"${clean}" is not one of this branch's floors. Choose a floor from the list, or set the branch's floors under Settings.`);
   }
@@ -384,9 +391,11 @@ export class RoomService {
     const pricingCollection = db.collection("room_pricing_rules");
     const bookingsCollection = db.collection("bookings");
 
+    const outletRef = outletDirectory.idOf(outlet_id);
+    if (!outletRef) throw new HttpError(400, "Unknown branch");
     const roomsRaw = await roomsCollection
       .find({
-        outlet_id,
+        outlet_id: outletRef,
         is_active: true,
         type: { $in: ROOM_TYPES },
       })
@@ -394,7 +403,7 @@ export class RoomService {
 
     const overlappingBookings = await bookingsCollection
       .find({
-        outlet_id,
+        outlet_id: outletRef,
         status: { $in: ACTIVE_BOOKING_STATUSES },
       })
       .toArray();
@@ -447,7 +456,7 @@ export class RoomService {
 
     const pricingRules = await pricingCollection
       .find({
-        outlet_id,
+        outlet_id: outletRef,
         $or: [
           { end_date: { $gte: checkIn } },
           { end_date: { $exists: false } },
@@ -465,7 +474,7 @@ export class RoomService {
       const { _id, ...rest } = room;
       return {
         id,
-        ...rest,
+        ...withOutletKey(rest),
         occupancy: pricing.occupancy,
         effective_rate_per_night: pricing.effective_rate_per_night,
         effective_total: pricing.effective_total,
@@ -574,7 +583,7 @@ export class RoomService {
         const filter: Record<string, unknown> = outletFilter(user);
         const roomsRaw = await roomsCollection.find(filter).sort({ created_at: -1 }).toArray();
         const rooms = roomsRaw.map((doc: Record<string, unknown>) => ({
-          ...doc,
+          ...withOutletKey(doc),
           id: toStringId(doc._id) ?? doc._id,
         }));
         return { rooms };
@@ -591,7 +600,7 @@ export class RoomService {
         const insertResult = await roomsCollection.insertOne(payloadDoc);
         return {
           id: toStringId(insertResult.insertedId) ?? String(insertResult.insertedId),
-          ...payloadDoc,
+          ...withOutletKey(payloadDoc),
         };
       }
 
@@ -618,7 +627,7 @@ export class RoomService {
         const payloadDoc = sanitiseRoomPayload({ ...existing, ...data } as Record<string, unknown>);
         assertOutlet(user, payloadDoc.outlet_id);
         // A floor is only checked when it is being changed, so a room saved before floors were set up can still be edited.
-        if (String(payloadDoc.level ?? "") !== String(existing.level ?? "") || payloadDoc.outlet_id !== existing.outlet_id) {
+        if (String(payloadDoc.level ?? "") !== String(existing.level ?? "") || String(payloadDoc.outlet_id) !== String(existing.outlet_id)) {
           await assertFloor(db, payloadDoc.outlet_id, payloadDoc.level);
         }
         payloadDoc.created_at = existing.created_at ?? payloadDoc.created_at;
@@ -666,7 +675,7 @@ export class RoomService {
             const normalised = normaliseRoomDocument(doc);
             if (!normalised) return null;
             return {
-              ...normalised,
+              ...withOutletKey(normalised as Record<string, unknown>),
               room_ids: normaliseRoomIds(doc.room_ids),
             };
           })
@@ -684,7 +693,8 @@ export class RoomService {
         const insertResult = await pricingCollection.insertOne(payloadDoc);
         return {
           id: toStringId(insertResult.insertedId) ?? String(insertResult.insertedId),
-          ...payloadDoc,
+          ...withOutletKey(payloadDoc),
+          room_ids: payloadDoc.room_ids.map(String),
         };
       }
 

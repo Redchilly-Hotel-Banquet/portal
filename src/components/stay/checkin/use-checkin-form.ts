@@ -1,7 +1,9 @@
 "use client";
 
 import { useReducer } from "react";
-import { optionalPhoneError, tenDigitPhone } from "@/lib/phone";
+import { normalisePhone, optionalPhoneError } from "@/lib/phone";
+import { photoSpecsOf } from "@/lib/document-types";
+import { hasAllPhotos } from "@/lib/document-photos";
 import {
   DOCUMENT_TYPES,
   type CheckinBooking,
@@ -37,6 +39,7 @@ export const blankGuest = (): GuestEntry => ({
   imageDataUrl: "",
   imageName: "",
   imageType: "",
+  extraImages: [],
   signature: "",
   savedIndex: null,
   savedImage: "",
@@ -74,19 +77,20 @@ function prefill(booking: CheckinBooking, details: CheckinDetails | null): Parti
   const guests: GuestEntry[] = Array.from({ length: count }, (_, index) => {
     const g = saved[index];
     // The booker is guest 1: start from the name and phone given when the booking was made.
-    if (!g) return index === 0 ? { ...blankGuest(), fullName: booking.guest_name?.trim() ?? "", phone: tenDigitPhone(booking.guest_phone) ?? "" } : blankGuest();
+    if (!g) return index === 0 ? { ...blankGuest(), fullName: booking.guest_name?.trim() ?? "", phone: normalisePhone(booking.guest_phone) ?? "" } : blankGuest();
     const image = g.document_image?.data_url ?? "";
     const signature = g.signature_image?.data_url ?? "";
     return {
       key: nextKey(),
       fullName: g.full_name ?? "",
       // The booker is guest 1, so their booking phone is the natural starting point.
-      phone: g.phone ?? (index === 0 ? tenDigitPhone(booking.guest_phone) ?? "" : ""),
+      phone: g.phone ?? (index === 0 ? normalisePhone(booking.guest_phone) ?? "" : ""),
       documentType: g.document_type || DOCUMENT_TYPES[0].value,
       documentNumber: g.document_number ?? "",
       imageDataUrl: image,
       imageName: g.document_image?.file_name ?? "",
       imageType: g.document_image?.mime_type ?? "",
+      extraImages: (g.document_images ?? []).slice(1).map((file) => ({ dataUrl: file?.data_url ?? "", name: file?.file_name ?? "", type: file?.mime_type ?? "", saved: file?.data_url ?? "" })),
       signature,
       savedIndex: index,
       savedImage: image,
@@ -166,7 +170,11 @@ export function validateGuests(guests: GuestEntry[]): CheckinErrors {
     else if (guest.documentType === "Aadhar Card" && number.replace(/\s/g, "").length !== 12)
       errors[`${guest.key}.number`] = "An Aadhaar number has 12 digits.";
     else if (number.length < 5) errors[`${guest.key}.number`] = "This looks too short. Please check the number.";
-    if (!guest.imageDataUrl) errors[`${guest.key}.image`] = "Add a photo of the identity document.";
+    const specs = photoSpecsOf(guest.documentType);
+    if (!hasAllPhotos(guest, specs)) {
+      const needed = specs.filter((s) => !s.optional).length;
+      errors[`${guest.key}.image`] = needed > 1 ? `Add all ${needed} required photos of the identity document.` : "Add a photo of the identity document.";
+    }
     if (!guest.signature) errors[`${guest.key}.signature`] = "This guest needs to sign.";
   });
   return errors;

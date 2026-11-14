@@ -4,6 +4,8 @@ import { CircleCheck, CircleAlert } from "lucide-react";
 import { formatDateTime } from "@/components/admin/format";
 import type { CheckinFormState } from "./use-checkin-form";
 import { DOCUMENT_TYPES } from "./types";
+import { photoSpecsOf } from "@/lib/document-types";
+import { hasAllPhotos } from "@/lib/document-photos";
 
 export function ReviewStep({ state }: { state: CheckinFormState }) {
   return (
@@ -25,7 +27,7 @@ export function ReviewStep({ state }: { state: CheckinFormState }) {
                 </span>
                 <span className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs">
                   {[
-                    [Boolean(guest.imageDataUrl), "ID photo attached", "ID photo missing"],
+                    [hasAllPhotos(guest, photoSpecsOf(guest.documentType)), photoSpecsOf(guest.documentType).length > 1 ? "ID photos attached" : "ID photo attached", photoSpecsOf(guest.documentType).length > 1 ? "ID photos missing" : "ID photo missing"],
                     [Boolean(guest.signature), "Signed", "Not signed"],
                   ].map(([ok, yes, no]) => (
                     <span key={String(yes)} className={ok ? "inline-flex items-center gap-1 text-success" : "inline-flex items-center gap-1 text-destructive"}>

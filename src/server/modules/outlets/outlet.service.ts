@@ -1,3 +1,5 @@
+import { normalisePhone } from "../../../lib/phone";
+import { outletDirectory } from "../../utils/outlets";
 import { mongoConnection } from "../../mongo";
 import { HttpError } from "../../httpError";
 import { normalizeDocument } from "../../utils/normalizers";
@@ -71,7 +73,9 @@ const buildOutletPayload = (
   const stringFields = ["name", "address", "contact_number", "contact_email", "google_maps_url", "wifi_name", "wifi_password", "welcome_message", "legal_name", "invoice_address", "invoice_phone", "invoice_email", "invoice_terms", "whatsapp_template"];
   for (const field of stringFields) {
     if (field in input) {
-      payload[field] = toStringOrEmpty(input[field]);
+      const value = toStringOrEmpty(input[field]);
+      // A branch's phone numbers are stored with their country dial code too ("+918240092248").
+      payload[field] = field === "contact_number" || field === "invoice_phone" ? (value ? (normalisePhone(value) ?? value) : "") : value;
     }
   }
 
@@ -86,7 +90,7 @@ const buildOutletPayload = (
   }
 
   // Check-in and check-out times of the day, 24-hour HH:mm in India time. Blank goes back to the default.
-  for (const field of ["checkin_time", "checkout_time"] as const) {
+  for (const field of ["checkin_time", "checkout_time", "message_checkin_time"] as const) {
     if (!(field in input)) continue;
     const value = toStringOrEmpty(input[field]);
     if (value && !isClock(value)) throw new HttpError(400, "Enter the time as hours and minutes, for example 14:00.");
@@ -171,6 +175,7 @@ export class OutletService {
         }
         const payload = buildOutletPayload(request.data, true);
         const result = await outletsCollection.insertOne(payload);
+        outletDirectory.invalidate();
         return {
           id: stringifyId(result) ?? result.toString(),
           outlet: { ...payload, _id: result },
@@ -199,6 +204,7 @@ export class OutletService {
         }
         const { matchedCount } = await outletsCollection.updateOne(filter, { $set: payload });
         if (!matchedCount) throw new HttpError(404, "Outlet not found");
+        outletDirectory.invalidate();
         return { success: true };
       }
       case "delete": {
@@ -208,6 +214,7 @@ export class OutletService {
         const filter = { _id: resolveOutletId(request.id) };
         const { deletedCount } = await outletsCollection.deleteOne(filter);
         if (!deletedCount) throw new HttpError(404, "Outlet not found");
+        outletDirectory.invalidate();
         return { success: true };
       }
       default: {

@@ -1,6 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
 import { Document, ObjectId } from "mongodb";
-import { env } from "../../env";
 import { mongoConnection } from "../../mongo";
 import { HttpError } from "../../httpError";
 import { signSession } from "../../session";
@@ -22,14 +20,9 @@ const buildUser = (doc: Document): AuthUser => ({
   id: stringifyId(doc._id) ?? "unknown",
   name: typeof doc.name === "string" ? doc.name : "Admin",
   roles: parseList(doc.purpose, "admin", true),
-  outlets: parseList(doc.outlets, "all", false),
+  // Branches are stored as ids (or "all"); the session carries them as text and they are turned into branch keys on each request.
+  outlets: parseList(Array.isArray(doc.outlets) ? doc.outlets.map((entry: unknown) => stringifyId(entry) ?? "") : doc.outlets, "all", false),
 });
-
-const safeEqual = (a: string, b: string) => {
-  const left = Buffer.from(a);
-  const right = Buffer.from(b);
-  return left.length === right.length && timingSafeEqual(left, right);
-};
 
 /** The token carries the real branch keys, so the screens and the API agree on which branches an account may use. */
 const issueToken = async (user: AuthUser): Promise<LoginResponse> => {
@@ -63,25 +56,15 @@ export const authService = {
       .collection("configs")
       .findOne({ name: userName, isActive: true }, { collation: { locale: "en", strength: 2 } });
 
-    const fallback = env.ADMIN_DEFAULT_PASSWORD;
+    if (!userDoc) throw new HttpError(401, "Invalid credentials");
 
-    if (!userDoc) {
-      // Recovery login for an administrator who has locked themselves out of every account.
-      if (Boolean(fallback) && safeEqual(password, fallback!)) {
-        return await issueToken({ id: "default-admin", name: "Admin", roles: ["admin"], outlets: ["all"] });
-      }
-      throw new HttpError(401, "Invalid credentials");
-    }
-
-    // An account with its own password is only opened by that password. The default password is for accounts
-    // that have none yet; it must never open an account that has one.
+    // An account without a password of its own cannot be opened with a username and password.
     const stored = typeof userDoc.adminPassword === "string" && userDoc.adminPassword ? userDoc.adminPassword : null;
-    const ok = stored ? verifyPassword(password, stored) : Boolean(fallback) && safeEqual(password, fallback!);
-    if (!ok) {
+    if (!stored || !verifyPassword(password, stored)) {
       throw new HttpError(401, "Invalid credentials");
     }
     // Older accounts keep their password as plain text; encrypt it from the first successful login.
-    if (stored && isPlain(stored)) {
+    if (isPlain(stored)) {
       await mongoConnection.getDb().collection("configs").updateOne({ _id: userDoc._id }, { $set: { adminPassword: storePassword(password) } });
     }
     return await issueToken(buildUser(userDoc));

@@ -9,6 +9,7 @@ import { apiPost } from "@/lib/apiClient";
 import { SITE } from "@/components/site/site-config";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PhoneInput } from "@/components/ui/phone-input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -221,16 +222,7 @@ export function BanquetForm() {
             Phone
             <Required />
           </Label>
-          <Input
-            id="bq-phone"
-            type="tel"
-            inputMode="tel"
-            autoComplete="tel"
-            placeholder="+91 9XXXXXXXXX"
-            required
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-          />
+          <PhoneInput id="bq-phone" required value={phone} onChange={(v) => setPhone(v)} />
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="bq-email">Email</Label>

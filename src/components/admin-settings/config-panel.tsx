@@ -19,6 +19,9 @@ import {
   type CheckinRuleSet,
   type CheckinRules,
 } from "@/lib/checkin-rules";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { DocumentTypesPanel } from "./document-types-panel";
+import { InvoicePanel } from "./invoice-panel";
 import { TemplateVariablesPanel } from "./template-variables-panel";
 
 const KEY = ["checkin-rules"];
@@ -81,8 +84,17 @@ export function ConfigPanel() {
   const dirty = JSON.stringify(sets) !== JSON.stringify(baseline);
 
   return (
-    <div className="space-y-6">
-      <TemplateVariablesPanel />
+    <Tabs defaultValue="checkin" className="space-y-6">
+      <TabsList>
+        <TabsTrigger value="checkin">Check-in rules</TabsTrigger>
+        <TabsTrigger value="documents">Documents</TabsTrigger>
+        <TabsTrigger value="invoice">Invoice</TabsTrigger>
+        <TabsTrigger value="messages">Message variables</TabsTrigger>
+      </TabsList>
+      <TabsContent value="documents" className="mt-0"><DocumentTypesPanel /></TabsContent>
+      <TabsContent value="invoice" className="mt-0"><InvoicePanel /></TabsContent>
+      <TabsContent value="messages" className="mt-0"><TemplateVariablesPanel /></TabsContent>
+      <TabsContent value="checkin" className="mt-0">
       <form
         className="max-w-3xl space-y-6"
         onSubmit={(event) => {
@@ -172,6 +184,7 @@ export function ConfigPanel() {
           </div>
         ) : null}
       </form>
-    </div>
+      </TabsContent>
+    </Tabs>
   );
 }

@@ -12,6 +12,7 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
+  QrCode,
   ShoppingBag,
   Settings,
   Store,
@@ -48,6 +49,7 @@ export const ADMIN_NAV: NavItem[] = [
   { label: "Settings", href: "/admin/settings", icon: Settings, scopes: ["admin"] },
   { label: "Access", href: "/admin/access", icon: UserCog, scopes: ["admin"] },
   { label: "Analytics", href: "/admin/analytics", icon: BarChart3, scopes: ["admin"] },
+  { label: "QR rewards", href: "/admin/rewards", icon: QrCode, scopes: ["admin"] },
 ];
 
 const ROLE_LABEL: Record<AdminScope, string> = { admin: "Administrator", rooms: "Front desk", kitchen: "Kitchen" };

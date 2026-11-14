@@ -30,6 +30,12 @@ export const mongoConnection = {
     return cache.pending;
   },
 
+  /** The shared client, for cluster-wide figures such as database sizes. */
+  getClient(): MongoClient {
+    if (!cache.client) throw new Error("Database not connected");
+    return cache.client;
+  },
+
   getDb(): Db {
     if (!cache.db) throw new Error("Database not connected");
     return cache.db;

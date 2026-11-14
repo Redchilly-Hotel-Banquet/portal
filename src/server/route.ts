@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { HttpError } from "./httpError";
 import { mongoConnection } from "./mongo";
+import { outletDirectory } from "./utils/outlets";
 import { userService } from "./modules/users/user.service";
 import { AuthenticatedUser, assertRoles, readSession } from "./session";
 import { resolveOutlets } from "./utils/access";
@@ -46,6 +47,7 @@ export const route =
       }
       if (needsSession && !user) throw new HttpError(401, "Missing or invalid authorization header");
       await mongoConnection.connect();
+      await outletDirectory.load();
       if ((needsSession || user) && user?.src === "user") {
         // Roles come from the database, not the token, so changes and deactivation apply immediately.
         const access = await userService.getAccess(user.id);

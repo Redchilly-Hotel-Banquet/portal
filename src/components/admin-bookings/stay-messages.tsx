@@ -2,9 +2,9 @@
 
 import { MessageCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { tenDigitPhone, whatsappLink } from "@/lib/phone";
+import { formatPhone, normalisePhone, whatsappLink } from "@/lib/phone";
 import { DEFAULT_WHATSAPP_TEMPLATE, renderTemplate } from "@/lib/whatsapp-template";
-import { formatClock, resolveStayTimes } from "@/lib/stay-times";
+import { formatClock, messageCheckinTime, resolveStayTimes } from "@/lib/stay-times";
 import type { Booking, WelcomeInfo } from "./types";
 
 type Recipient = { name: string; phone: string };
@@ -14,7 +14,7 @@ const recipientsOf = (booking: Booking): Recipient[] => {
   const seen = new Set<string>();
   const out: Recipient[] = [];
   const add = (name: string | undefined, raw: string | null | undefined) => {
-    const phone = tenDigitPhone(raw);
+    const phone = normalisePhone(raw);
     if (!phone || seen.has(phone)) return;
     seen.add(phone);
     out.push({ name: name?.trim() || "Guest", phone });
@@ -88,7 +88,7 @@ export const welcomeMessage = (
     checkin_id: booking.checkin_id ?? "",
     wifi: wifiText,
     note: welcome?.welcome_message ?? "",
-    checkin_time: formatClock(times.checkin_time),
+    checkin_time: formatClock(messageCheckinTime(welcome)),
     checkout_time: formatClock(times.checkout_time),
   });
 };
@@ -123,7 +123,7 @@ export function StayMessages({
               <li key={recipient.phone} className="flex items-center justify-between gap-3 p-3">
                 <span className="min-w-0">
                   <span className="block truncate font-medium">{recipient.name}</span>
-                  <span className="text-xs text-muted-foreground tabular-nums">+91 {recipient.phone}</span>
+                  <span className="text-xs text-muted-foreground tabular-nums">{formatPhone(recipient.phone)}</span>
                 </span>
                 {href ? (
                   <Button asChild size="sm" variant="outline">

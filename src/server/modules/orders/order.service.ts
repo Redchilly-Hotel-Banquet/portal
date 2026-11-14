@@ -6,6 +6,8 @@ import { mongoConnection } from "../../mongo";
 import { HttpError } from "../../httpError";
 import { AuthenticatedUser } from "../../session";
 import { stringifyId, toObjectId } from "../../utils/objectId";
+import { outletDirectory, outletKeyOf } from "../../utils/outlets";
+import { categoryNames, presentMenuItem, withOutletKey } from "../../utils/menuRefs";
 import {
   AdminManageOrdersRequest,
   CreateOrderRequest,
@@ -68,7 +70,7 @@ type RoomTableDocument = Record<string, unknown> & {
 
 type OrderItemDocument = Record<string, unknown> & {
   _id?: FlexibleId;
-  order_id?: string;
+  order_id?: FlexibleId;
   menu_item_id?: FlexibleId;
 };
 
@@ -122,7 +124,9 @@ export class OrderService {
     }
 
     // Rooms and tables must exist and belong to the outlet being ordered from.
-    if (!location || (location.outlet_id && String(location.outlet_id) !== String(outletId))) {
+    const outletRef = outletDirectory.idOf(outletId);
+    if (!outletRef) throw new HttpError(400, "Unknown branch");
+    if (!location || (location.outlet_id && String(location.outlet_id) !== String(outletRef))) {
       throw new HttpError(400, "Unknown room or table for this branch");
     }
 
@@ -131,6 +135,7 @@ export class OrderService {
       (location.type ?? "").toString().toUpperCase() === "HOTEL_ROOM";
 
     let resolvedBookingId: string | null = null;
+    let activeBookingRef: ObjectId | null = null;
     if (isRoomOrder) {
       const roomIdString = serializeId(location._id) ?? "";
       // Only a checked-in stay can order to its room, and only with proof it is theirs. The booking is
@@ -140,12 +145,13 @@ export class OrderService {
         await assertCheckinId(db, `room:${roomIdString}`, activeBooking, payload.checkinId);
       }
       resolvedBookingId = serializeId(activeBooking?._id);
+      activeBookingRef = (activeBooking?._id as ObjectId | undefined) ?? null;
     }
 
     const orderDoc = {
-      outlet_id: outletId,
-      room_table_id: roomTableId ?? null,
-      booking_id: resolvedBookingId,
+      outlet_id: outletRef,
+      room_table_id: location._id,
+      booking_id: activeBookingRef,
       special_instructions: specialInstructions || null,
       subtotal,
       total: subtotal,
@@ -158,7 +164,7 @@ export class OrderService {
     const orderId = serializeId(insertResult.insertedId) ?? insertResult.insertedId.toString();
 
     const orderItems = items.map((item) => ({
-      order_id: orderId,
+      order_id: insertResult.insertedId,
       menu_item_id: toObjectId(item.id) ?? item.id,
       quantity: Number(item.quantity ?? 0),
       price: Number(item.price ?? 0),
@@ -186,12 +192,12 @@ export class OrderService {
     const orderItemsCollection = db.collection<OrderItemDocument>("order_items");
     const menuItemsCollection = db.collection<MenuItemDocument>("menu_items");
     const orders = await ordersCollection
-      .find({ booking_id: { $in: [bookingId, toObjectId(bookingId)].filter(Boolean) } })
+      .find({ booking_id: toObjectId(bookingId) ?? "no-such-booking" })
       .sort({ created_at: -1 })
       .toArray();
 
     // Rooms, order items and menu items are fetched in bulk, not once per order.
-    const orderIds = orders.map((order) => serializeId(order._id)).filter((id): id is string => Boolean(id));
+    const orderIds = orders.map((order) => order._id as ObjectId);
     const roomIds = Array.from(new Set(orders.map((order) => order.room_table_id).filter(Boolean).map((id) => String(id))));
     const [rooms, allItems] = await Promise.all([
       roomIds.length
@@ -199,10 +205,11 @@ export class OrderService {
         : [],
       orderIds.length ? orderItemsCollection.find({ order_id: { $in: orderIds } }).toArray() : [],
     ]);
-    const roomsById = new Map<string, any>((rooms as any[]).map((room) => [serializeId(room._id) ?? "", room]));
+    const roomsById = new Map<string, any>((rooms as any[]).map((room) => [serializeId(room._id) ?? "", withOutletKey(room)]));
+    const catNames = await categoryNames(db);
     const menuItemIds = Array.from(new Set(allItems.map((it) => toObjectId(it.menu_item_id)).filter((id): id is ObjectId => Boolean(id))));
     const menuItems = menuItemIds.length ? await menuItemsCollection.find({ _id: { $in: menuItemIds } }).toArray() : [];
-    const menuItemsById = new Map<string, unknown>(menuItems.map((mi) => [serializeId(mi._id) ?? "", mi]));
+    const menuItemsById = new Map<string, unknown>(menuItems.map((mi) => [serializeId(mi._id) ?? "", presentMenuItem(mi, catNames)]));
     const itemsByOrder = new Map<string, OrderItemDocument[]>();
     for (const item of allItems) {
       const list = itemsByOrder.get(String(item.order_id)) ?? [];
@@ -221,7 +228,7 @@ export class OrderService {
       }));
 
       enrichedOrders.push({
-        ...order,
+        ...withOutletKey(order),
         id: orderId,
         _id: orderId,
         booking_id: serializeId(order.booking_id),
@@ -247,10 +254,10 @@ export class OrderService {
     const menuItemsCollection = db.collection<MenuItemDocument>("menu_items");
     const filter = { _id: resolveCollectionId(orderId, "Invalid order id") } as {
       _id: FlexibleId;
-      booking_id?: string;
+      booking_id?: ObjectId | string;
     };
     if (bookingId) {
-      filter.booking_id = bookingId;
+      filter.booking_id = toObjectId(bookingId) ?? "no-such-booking";
     }
 
     const order = await ordersCollection.findOne(filter);
@@ -265,7 +272,7 @@ export class OrderService {
     // Room orders are private to the stay. Table orders have no booking and stay readable by their id.
     if (orderBookingId) await authoriseBooking(db, orderBookingId, payload.checkinId, user);
 
-    const orderItems = await orderItemsCollection.find({ order_id: orderId }).toArray();
+    const orderItems = await orderItemsCollection.find({ order_id: order._id as ObjectId }).toArray();
     const menuItemIds = orderItems
       .map((item) => toObjectId(item.menu_item_id))
       .filter((id): id is ObjectId => Boolean(id));
@@ -273,20 +280,21 @@ export class OrderService {
     const menuItems = menuItemIds.length
       ? await menuItemsCollection.find({ _id: { $in: menuItemIds } }).toArray()
       : [];
+    const catNames = await categoryNames(db);
 
     let roomTable = null;
     if (order.room_table_id) {
       const resolvedRoomId = resolveCollectionId(order.room_table_id, "Invalid room id");
-      roomTable = await roomsCollection.findOne({ _id: resolvedRoomId });
+      roomTable = withOutletKey((await roomsCollection.findOne({ _id: resolvedRoomId })) as any);
     }
 
     const enrichedOrderItems = orderItems.map((item) => {
       const menuItem = menuItems.find((mi) => serializeId(mi._id) === serializeId(item.menu_item_id));
-      return { ...item, menu_items: menuItem };
+      return { ...item, menu_items: menuItem ? presentMenuItem(menuItem, catNames) : menuItem };
     });
 
     return {
-      ...order,
+      ...withOutletKey(order),
       id: serializeId(order._id) ?? "",
       order_items: enrichedOrderItems,
       rooms_tables: roomTable,
@@ -322,7 +330,7 @@ export class OrderService {
 
         const orders = await ordersCollection.find(filter).sort({ created_at: -1 }).toArray();
         // Bulk lookups rather than three queries per order; the kitchen screen polls this list.
-        const orderIds = orders.map((order) => serializeId(order._id) ?? "").filter(Boolean);
+        const orderIds = orders.map((order) => order._id as ObjectId);
         const roomIds = Array.from(new Set(orders.map((order) => order.room_table_id).filter(Boolean).map((id) => String(id))));
         const [rooms, allItems] = await Promise.all([
           roomIds.length
@@ -336,8 +344,9 @@ export class OrderService {
           ? await menuItemsCollection.find({ _id: { $in: menuIds.flatMap((id) => [id, toObjectId(id)].filter(Boolean) as FlexibleId[]) } }).toArray()
           : [];
         const menuById = new Map<string, any>(menuDocs.map((doc) => [serializeId(doc._id) ?? "", doc]));
+        const catNames = await categoryNames(db);
         for (const item of allItems) {
-          item.menu_items = item.menu_item_id ? menuById.get(String(item.menu_item_id)) ?? null : null;
+          item.menu_items = item.menu_item_id ? (menuById.get(String(item.menu_item_id)) ? presentMenuItem(menuById.get(String(item.menu_item_id)), catNames) : null) : null;
         }
         const itemsByOrder = new Map<string, OrderItemDocument[]>();
         for (const item of allItems) {
@@ -346,6 +355,7 @@ export class OrderService {
           itemsByOrder.set(String(item.order_id), list);
         }
         for (const order of orders) {
+          if (order.outlet_id !== undefined) (order as any).outlet_id = outletKeyOf(order.outlet_id);
           // Only where to deliver it: the kitchen has no use for a room's rates or amenities.
           const room = order.room_table_id ? roomsById.get(String(order.room_table_id)) : null;
           if (order.room_table_id) order.rooms_tables = room ? { _id: room._id, type: room.type, code: room.code } : null;

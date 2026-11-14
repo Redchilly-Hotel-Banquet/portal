@@ -3,7 +3,8 @@ import type { Collection, Db } from "mongodb";
 import { HttpError } from "../httpError";
 import type { AuthenticatedUser } from "../session";
 import { currentRoomIds } from "./roomAssignments";
-import { stringifyId } from "./objectId";
+import { stringifyId, toObjectId } from "./objectId";
+import { outletDirectory } from "./outlets";
 
 /**
  * The check-in ID is a 6-digit number on every booking. It is what proves a person is a guest of the
@@ -73,12 +74,13 @@ export const ownsBooking = (booking: Record<string, any> | null, user: Authentic
 
 /** The booking currently checked in to this room, or null. Only checked-in stays may order to a room. */
 export const findCheckedInBookingForRoom = async (db: Db, roomId: string, outletKey?: string) => {
+  const rid = toObjectId(roomId) ?? "no-such-room";
   const candidates = await db
     .collection("bookings")
     .find({
       status: "CHECKED_IN",
-      ...(outletKey ? { outlet_id: outletKey } : {}),
-      $or: [{ room_id: roomId }, { room_ids: roomId }, { "rooms_allocated.room_id": roomId }, { "checkin_details.assigned_rooms.id": roomId }],
+      ...(outletKey ? { outlet_id: outletDirectory.idOf(outletKey) ?? "no-such-branch" } : {}),
+      $or: [{ room_id: rid }, { room_ids: rid }, { "rooms_allocated.room_id": rid }, { "checkin_details.assigned_rooms.id": rid }],
     })
     .toArray();
   return candidates.find((booking) => currentRoomIds(booking).includes(roomId)) ?? null;

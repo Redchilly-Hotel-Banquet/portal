@@ -11,5 +11,4 @@ next-env.d.ts
 .DS_Store
 *.log
 room-repair-backup-*.json
-.env.example
 scripts

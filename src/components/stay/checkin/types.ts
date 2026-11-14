@@ -1,3 +1,5 @@
+import type { SideImage } from "@/lib/document-photos";
+
 export interface CheckinBooking {
   id: string;
   guest_name: string;
@@ -38,6 +40,8 @@ export interface CheckinDetails {
     has_document_image?: boolean;
     has_signature?: boolean;
     document_image?: StoredImage | null;
+    /** Every photo of the document, in order; the first is document_image. */
+    document_images?: Array<StoredImage | null>;
     signature_image?: StoredImage | null;
   }>;
   signature?: StoredImage | null;
@@ -63,6 +67,8 @@ export interface GuestEntry {
   imageDataUrl: string;
   imageName: string;
   imageType: string;
+  /** The photos after the first (the back of a card, …). */
+  extraImages: SideImage[];
   /** Signature drawn by this guest (PNG data URL), or "". */
   signature: string;
   /** Index this guest had in the saved record, so unchanged images need not be re-uploaded. */

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -14,12 +14,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { PhoneInput } from "@/components/ui/phone-input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { formatINR } from "@/components/admin/format";
 import { apiPost } from "@/lib/apiClient";
 import { getAdminOutlets, hasOutletAccess } from "@/hooks/useAdminAccess";
+import { normaliseCheckinRuleSets, rulesForOutlet } from "@/lib/checkin-rules";
 import type { Booking, CreateBookingForm, OutletOption } from "./types";
 import { useCreateBooking } from "./use-bookings";
 
@@ -49,8 +51,10 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   outlets: OutletOption[];
   defaultOutlet: string;
-  /** Called with the new booking so the caller can go straight on to check-in. */
-  onCreated?: (booking: Booking) => void;
+  /** Called with the new booking (and the form it came from) so the caller can go straight on to check-in. */
+  onCreated?: (booking: Booking, form: CreateBookingForm) => void;
+  /** Pre-fills the form when it opens, for coming back from check-in. */
+  initialForm?: CreateBookingForm | null;
 };
 
 function Field({ id, label, hint, className, children }: { id: string; label: string; hint?: string; className?: string; children: React.ReactNode }) {
@@ -63,16 +67,26 @@ function Field({ id, label, hint, className, children }: { id: string; label: st
   );
 }
 
-export function CreateBookingDialog({ open, onOpenChange, outlets, defaultOutlet, onCreated }: Props) {
+export function CreateBookingDialog({ open, onOpenChange, outlets, defaultOutlet, onCreated, initialForm }: Props) {
   const [form, setForm] = useState<CreateBookingForm>(EMPTY_FORM);
   // Set once the receptionist types their own total, so the suggested one stops overwriting it.
   const [totalEdited, setTotalEdited] = useState(false);
+  // What was submitted, handed on with the new booking so check-in can come back to this form.
+  const submitted = useRef<CreateBookingForm>(EMPTY_FORM);
   const mutation = useCreateBooking((data) => {
     setForm(EMPTY_FORM);
     setTotalEdited(false);
     onOpenChange(false);
-    if (data?.booking) onCreated?.(data.booking);
+    if (data?.booking) onCreated?.(data.booking, submitted.current);
   });
+
+  // Coming back from check-in: fill the form with what was entered before.
+  useEffect(() => {
+    if (!open || !initialForm) return;
+    setForm(initialForm);
+    setTotalEdited(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const allowedOutlets = useMemo(() => {
     if (!open) return outlets;
@@ -103,6 +117,15 @@ export function CreateBookingDialog({ open, onOpenChange, outlets, defaultOutlet
     enabled: open && validDates,
     staleTime: 30_000,
   });
+  const rulesQuery = useQuery({
+    queryKey: ["checkin-rules"],
+    queryFn: () => apiPost<{ checkin_rule_sets?: unknown }>("/admin/config", { action: "get" }, true),
+    select: (data) => normaliseCheckinRuleSets(data?.checkin_rule_sets),
+    enabled: open,
+    staleTime: 60_000,
+  });
+  // Phone is only mandatory when the branch's check-in rules ask for one.
+  const phoneRequired = rulesForOutlet(rulesQuery.data ?? [], form.outlet_id).contact_phone;
   const categories = validDates ? (categoriesQuery.data ?? []) : [];
   const selectedCategory = categories.find((entry) => entry.category === form.preferred_room_type);
 
@@ -136,7 +159,7 @@ export function CreateBookingDialog({ open, onOpenChange, outlets, defaultOutlet
     const guestPhone = form.guest_phone.trim();
     const roomType = form.preferred_room_type.trim();
 
-    if (!form.outlet_id || !guestName || !guestPhone || !form.check_in_date || !form.check_out_date) {
+    if (!form.outlet_id || !guestName || (phoneRequired && !guestPhone) || !form.check_in_date || !form.check_out_date) {
       return fail("Branch, guest details and stay dates are required.");
     }
     if (!roomType) return fail("Select the preferred room type.");
@@ -173,6 +196,7 @@ export function CreateBookingDialog({ open, onOpenChange, outlets, defaultOutlet
       special_requests: form.special_requests.trim() || null,
     };
     if (total !== undefined) payload.total_amount = total;
+    submitted.current = form;
     mutation.mutate(payload);
   };
 
@@ -215,8 +239,8 @@ export function CreateBookingDialog({ open, onOpenChange, outlets, defaultOutlet
             <Field id="create-guest-name" label="Guest name *">
               <Input id="create-guest-name" autoComplete="off" value={form.guest_name} onChange={(e) => set("guest_name", e.target.value)} required />
             </Field>
-            <Field id="create-phone" label="Phone *">
-              <Input id="create-phone" type="tel" inputMode="tel" autoComplete="off" value={form.guest_phone} onChange={(e) => set("guest_phone", e.target.value)} required />
+            <Field id="create-phone" label={phoneRequired ? "Phone *" : "Phone"}>
+              <PhoneInput id="create-phone" required={phoneRequired} value={form.guest_phone} onChange={(v) => set("guest_phone", v)} />
             </Field>
             <Field id="create-email" label="Email">
               <Input id="create-email" type="email" autoComplete="off" value={form.guest_email} onChange={(e) => set("guest_email", e.target.value)} />

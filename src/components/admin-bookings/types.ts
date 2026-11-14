@@ -92,6 +92,8 @@ export type WelcomeInfo = {
   /** The branch's check-in and check-out times, 24-hour HH:mm in India time. */
   checkin_time?: string;
   checkout_time?: string;
+  /** Check-in time quoted in the WhatsApp message (may differ from the real check-in time). */
+  message_checkin_time?: string;
   /** The business's own message variables that apply to this branch, by name. */
   variables?: Record<string, string>;
 };
@@ -137,6 +139,8 @@ export type BillingSummary = {
   booking: Booking;
   foodTotal: number;
   roomTotal: number;
+  /** What the printed invoice shows, as set under Settings for the branch. */
+  invoice_settings?: unknown;
   /** Who the invoice is from, as set under Settings for the branch. */
   invoice?: { legal_name: string; gstin: string; address: string; phone: string; email: string; terms: string };
   /** Room plus food before GST. */
@@ -155,6 +159,8 @@ export type CheckinGuest = {
   document_type: string;
   document_number: string;
   document_image?: DocumentImage | null;
+  /** Every photo of the document, in order (front, back, …); the first is document_image. */
+  document_images?: Array<DocumentImage | null>;
   signature_image?: DocumentImage | null;
 };
 

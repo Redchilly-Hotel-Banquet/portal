@@ -10,9 +10,13 @@ import { assignedRoomIds, bookingViewForWindow, currentRoomIds, isCheckinLocked,
 import { ensureUniqueCheckinId } from "../../utils/checkinId";
 import { reconcileSegments, stayExtension, type ExtendRequest } from "./stay-extension";
 import { assertAdmin, assertOutlet } from "../../utils/access";
+import { normalisePhone } from "../../../lib/phone";
+import { photoSpecsFor } from "../../../lib/document-types";
+import { outletDirectory, outletKeyOf } from "../../utils/outlets";
+import { storeBookingRefs, whoRef } from "../../utils/bookingRefs";
 import { computeGst, type GstSummary } from "../../utils/gst";
 import { variablesForOutlet } from "../../../lib/template-variables";
-import { resolveStayTimes, stayPhase, stayWindow, type StayTimes } from "../../../lib/stay-times";
+import { messageCheckinTime, resolveStayTimes, stayPhase, stayWindow, type StayTimes } from "../../../lib/stay-times";
 import { PAYMENT_MODE_VALUES, type PaymentLine } from "../../../lib/payment-modes";
 import {
   documentFileStem,
@@ -45,7 +49,7 @@ type OutletRecord = Record<string, unknown> & {
 };
 
 type ManageBookingsRequest = ExtendRequest & {
-  action: "list" | "update_status" | "update_amount" | "extension_options" | "extend_stay" | "update_stay_rate" | "split_stay_lines";
+  action: "list" | "update_status" | "update_amount" | "extension_options" | "extend_stay" | "update_stay_rate" | "split_stay_lines" | "discard_new";
   status?: string;
   totalAmount?: number;
 };
@@ -120,15 +124,11 @@ const DAY_IN_MS = 86_400_000;
 const formatStayMoment = (instant: number): string =>
   new Date(instant).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" });
 
-/** The branch's check-in and check-out times; a booking's outlet_id is the branch's location key (older ones, its id). */
+/** The branch's check-in and check-out times; a booking's outlet_id is the branch's _id. */
 const outletStayTimes = async (outletId: unknown): Promise<StayTimes> => {
-  const key = typeof outletId === "string" ? outletId : outletId ? String(outletId) : "";
-  if (!key) return resolveStayTimes();
-  const objectId = toObjectId(key);
-  const outlet = await mongoConnection
-    .getDb()
-    .collection("outlets")
-    .findOne({ $or: [{ location_key: key }, ...(objectId ? [{ _id: objectId }] : [])] } as any);
+  const id = outletDirectory.idOf(outletId);
+  if (!id) return resolveStayTimes();
+  const outlet = await mongoConnection.getDb().collection("outlets").findOne({ _id: id } as any);
   return resolveStayTimes(outlet as Record<string, unknown> | null);
 };
 
@@ -188,17 +188,13 @@ const normaliseId = (value: unknown): string | undefined => {
   return undefined;
 };
 
-/** Optional 10-digit Indian mobile number (a leading +91, 91 or 0 is dropped). Null when blank. */
+/** Optional phone number, stored with its country dial code ("+919876543210"). Null when blank. */
 const normaliseGuestPhone = (value: unknown, label: string): string | null => {
   const raw = normaliseString(value);
   if (!raw) return null;
-  let digits = raw.replace(/\D/g, "");
-  if (digits.length === 12 && digits.startsWith("91")) digits = digits.slice(2);
-  else if (digits.length === 11 && digits.startsWith("0")) digits = digits.slice(1);
-  if (!/^[6-9]\d{9}$/.test(digits)) {
-    throw new HttpError(400, `${label}: enter a valid 10-digit mobile number, or leave it blank.`);
-  }
-  return digits;
+  const phone = normalisePhone(raw);
+  if (!phone) throw new HttpError(400, `${label}: enter a valid phone number, or leave it blank.`);
+  return phone;
 };
 
 /** Validates how the guest paid. Amounts are checked against the total once the bill is known. */
@@ -425,6 +421,7 @@ const serialiseBookingDetailed = (doc: Record<string, unknown>, includeCheckinId
   } else {
     delete clone._id;
   }
+  if (clone.outlet_id) clone.outlet_id = outletKeyOf(clone.outlet_id) ?? clone.outlet_id;
 
   if (clone.room_id) {
     const roomId = stringifyId(clone.room_id);
@@ -458,7 +455,7 @@ const serialiseEmbedded = (doc: any) => {
   const { wifi_name, wifi_password, wifi_floors, welcome_message, whatsapp_template, ...safe } = doc;
   const normalised = normalizeDocument(safe);
   if (!normalised) return null;
-  return { ...normalised, id: normalised.id ?? stringifyId(doc?._id) ?? "" };
+  return { ...normalised, id: normalised.id ?? stringifyId(doc?._id) ?? "", ...((normalised as any).outlet_id ? { outlet_id: outletKeyOf((normalised as any).outlet_id) ?? (normalised as any).outlet_id } : {}) };
 };
 
 
@@ -480,7 +477,7 @@ const summariseCheckin = (details: Record<string, any> | null | undefined) => {
       full_name: guest?.full_name ?? "",
       document_type: guest?.document_type ?? "",
       document_number_last4: last4(guest?.document_number),
-      has_document_image: hasStoredFile(guest?.document_image),
+      has_document_image: hasStoredFile(guest?.document_image) || (Array.isArray(guest?.document_images) && guest.document_images.some((file: any) => hasStoredFile(file))),
       has_signature: hasStoredFile(guest?.signature_image),
     })),
     has_signature: hasStoredFile(signature),
@@ -495,6 +492,7 @@ const normaliseBooking = (doc: any, includeCheckinId = false) => {
   const normalised = normalizeDocument(rest);
   if (!normalised) return null;
   if (normalised.status) normalised.status = withoutPending(normalised.status);
+  if ((normalised as any).outlet_id) (normalised as any).outlet_id = outletKeyOf((normalised as any).outlet_id) ?? (normalised as any).outlet_id;
   const primaryRoomId = stringifyId(rest.room_id);
   if (primaryRoomId) normalised.room_id = primaryRoomId;
   if (Array.isArray(normalised.room_ids)) {
@@ -513,6 +511,8 @@ export class BookingService {
     if (!outletIdRaw) {
       throw new HttpError(400, "outlet_id is required");
     }
+    const outletRef = outletDirectory.idOf(outletIdRaw);
+    if (!outletRef) throw new HttpError(400, "Unknown branch");
 
     const checkInRaw = request?.check_in_date;
     const checkOutRaw = request?.check_out_date;
@@ -571,7 +571,7 @@ export class BookingService {
 
     const guestEmailRaw = normaliseString(request?.guest_email);
     const guestEmail = guestEmailRaw ? guestEmailRaw.toLowerCase() : null;
-    const guestPhone = normaliseString(request?.guest_phone) || null;
+    const guestPhone = request?.guest_phone ? normaliseGuestPhone(request.guest_phone, "Phone") : null;
 
     const specialRequests =
       normaliseString(request?.special_requests ?? request?.specialRequests) ||
@@ -595,9 +595,9 @@ export class BookingService {
     const bookingCode = await ensureUniqueBookingCode(bookingsCollection);
     const checkinId = await ensureUniqueCheckinId(bookingsCollection);
 
-    const bookingDoc: Omit<BookingRecord, "_id"> & { roomsRequested: number } =
+    const bookingDoc: Omit<BookingRecord, "_id"> =
       {
-        outlet_id: outletIdRaw,
+        outlet_id: outletRef,
         guest_name: guestName,
         guest_email: guestEmail,
         guest_phone: guestPhone,
@@ -605,7 +605,6 @@ export class BookingService {
         check_out_date: checkOut,
         number_of_guests: guestsCount,
         rooms_requested: roomsRequested,
-        roomsRequested,
         preferred_room_type: preferredRoomType || null,
         preferred_categories: preferredCategories,
         total_amount: Number(totalAmount.toFixed(2)),
@@ -649,7 +648,7 @@ export class BookingService {
       case "list": {
         const filter: Record<string, unknown> = {};
         if (!user.outlets.includes("all")) {
-          filter.outlet_id = { $in: user.outlets };
+          filter.outlet_id = { $in: outletDirectory.idsOf(user.outlets) };
         }
         const bookings = await bookingsCollection
           .find(filter)
@@ -689,6 +688,7 @@ export class BookingService {
             welcome_message: normaliseString((outlet as any).welcome_message),
             whatsapp_template: normaliseString((outlet as any).whatsapp_template),
             ...resolveStayTimes(outlet as Record<string, unknown>),
+            message_checkin_time: messageCheckinTime(outlet as Record<string, unknown>),
             variables: variablesForOutlet(templateVariables, key),
           };
         }
@@ -698,6 +698,23 @@ export class BookingService {
         for (const id of heldRoomIds) room_levels[String(id)] = normaliseString(roomsById.get(String(id))?.level);
 
         return { bookings: enriched, welcome, room_levels };
+      }
+
+      // Undoes a reservation that was only just made and has not been touched since, so "back" from check-in leaves nothing behind.
+      case "discard_new": {
+        const filter = { _id: resolveDocumentId(request.id, "Invalid booking id") };
+        const current = await bookingsCollection.findOne(filter);
+        if (!current) return { success: true };
+        assertOutlet(user, current.outlet_id);
+        const created = current.created_at ? new Date(current.created_at as any).getTime() : 0;
+        const untouched =
+          ["CONFIRMED", "PENDING"].includes(String(current.status).toUpperCase()) &&
+          !current.checkin_details &&
+          Date.now() - created < 2 * 60 * 60 * 1000 &&
+          (await db.collection("orders").countDocuments({ booking_id: current._id })) === 0;
+        if (!untouched) throw new HttpError(409, "This reservation already has check-in details or orders, so it can't be undone. Edit it from the bookings list instead.");
+        await bookingsCollection.deleteOne(filter);
+        return { success: true };
       }
 
       case "update_status": {
@@ -982,7 +999,8 @@ export class BookingService {
       }
 
       // Reception's own requirements come from Settings; guests checking in online always give everything.
-      const rules = isPrivileged ? await configService.getCheckinRules(typeof booking.outlet_id === "string" ? booking.outlet_id : null) : DEFAULT_CHECKIN_RULES;
+      const documentTypes = await configService.getDocumentTypes();
+      const rules = isPrivileged ? await configService.getCheckinRules(outletKeyOf(booking.outlet_id)) : DEFAULT_CHECKIN_RULES;
       const mustHave = (required: boolean) => !isPrivileged || required;
 
       const mappedGuests = incomingGuests.map(
@@ -1032,10 +1050,31 @@ export class BookingService {
               }
             : (existingGuest?.document_image ?? null);
 
-          if (!imagePayload && mustHave(rules.document_photo)) {
+          // A document can have more photos than the front (the back of a card). Slot 0 is the one above; the others
+          // arrive as documentExtraImages[i - 1] and, when not sent, are kept from what is already saved.
+          const photoSpecs = photoSpecsFor(documentTypes, documentType);
+          const photoCount = photoSpecs.length;
+          const extraIncoming: unknown[] = Array.isArray(guest?.documentExtraImages) ? guest.documentExtraImages : [];
+          const previousImages: any[] = Array.isArray(existingGuest?.document_images) ? existingGuest.document_images : [];
+          const documentImages: any[] = [imagePayload];
+          for (let side = 1; side < photoCount; side += 1) {
+            const sent = (extraIncoming[side - 1] ?? null) as Record<string, unknown> | null;
+            const sentUrl = sent ? sanitiseDataUrl(sent.dataUrl ?? sent.data_url) : null;
+            documentImages.push(
+              sentUrl
+                ? { data_url: sentUrl, file_name: normaliseString(sent?.name), mime_type: normaliseString(sent?.type), uploaded_at: new Date().toISOString() }
+                : (previousImages[side] ?? null),
+            );
+          }
+
+          // Photos marked optional in Settings may be left out; the rest are needed when the rules ask for a photo.
+          const requiredCount = photoSpecs.filter((spec) => !spec.optional).length;
+          if (mustHave(rules.document_photo) && photoSpecs.some((spec, side) => !spec.optional && !documentImages[side])) {
             throw new HttpError(
               400,
-              `Guest ${index + 1}: identity document image is required.`,
+              requiredCount > 1
+                ? `Guest ${index + 1}: add all ${requiredCount} required photos of the identity document.`
+                : `Guest ${index + 1}: identity document image is required.`,
             );
           }
 
@@ -1074,6 +1113,7 @@ export class BookingService {
             document_type: documentType,
             document_number: documentNumber,
             document_image: imagePayload,
+            document_images: documentImages,
             signature_image: signaturePayload,
           };
         },
@@ -1089,8 +1129,9 @@ export class BookingService {
           throw new HttpError(400, "Add at least one guest before checking in.");
         }
         sanitisedGuests.forEach((guest, index) => {
-          if (!guest.document_image && mustHave(rules.document_photo)) {
-            throw new HttpError(400, `Guest ${index + 1}: attach an identity document before check-in.`);
+          const specs = photoSpecsFor(documentTypes, guest.document_type);
+          if (mustHave(rules.document_photo) && specs.some((spec, side) => !spec.optional && !(guest.document_images ?? [])[side])) {
+            throw new HttpError(400, `Guest ${index + 1}: attach every photo of the identity document before check-in.`);
           }
           if (!guest.signature_image && mustHave(rules.signature)) {
             throw new HttpError(400, `Guest ${index + 1}: a signature is required before check-in.`);
@@ -1210,15 +1251,20 @@ export class BookingService {
 
       // Images go to R2 (Bookings/<day>/<booking id>/); Mongo keeps only their keys.
       const storedGuests = await Promise.all(
-        sanitisedGuests.map(async (guest: any, index: number) => ({
-          ...guest,
-          document_image: await persistBookingFile(
-            booking,
-            documentFileStem(guest.document_type, index),
-            guest.document_image,
-          ),
-          signature_image: await persistBookingFile(booking, signatureFileStem(index), guest.signature_image),
-        })),
+        sanitisedGuests.map(async (guest: any, index: number) => {
+          const stem = documentFileStem(guest.document_type, index);
+          const first = await persistBookingFile(booking, stem, guest.document_image);
+          // The first photo is stored once and shared by document_image and document_images[0]; the others get their own files (…-2, …-3).
+          const others = await Promise.all(
+            (guest.document_images ?? []).slice(1).map((image: any, side: number) => persistBookingFile(booking, `${stem}-${side + 2}`, image)),
+          );
+          return {
+            ...guest,
+            document_image: first,
+            document_images: [first, ...others],
+            signature_image: await persistBookingFile(booking, signatureFileStem(index), guest.signature_image),
+          };
+        }),
       );
 
       const signatureRaw = sanitiseDataUrl(
@@ -1384,7 +1430,7 @@ export class BookingService {
         }
       }
 
-      await bookingsCollection.updateOne(bookingFilter, { $set: updateDoc });
+      await bookingsCollection.updateOne(bookingFilter, { $set: storeBookingRefs(updateDoc) });
 
       const updatedBooking = await bookingsCollection.findOne(bookingFilter);
       const refreshedAvailability = await computeAvailableRooms(
@@ -1675,7 +1721,7 @@ export class BookingService {
           payments,
           payment_status: "PAID",
           paid_at: now,
-          payment_received_by: received,
+          payment_received_by: whoRef(received),
           updated_at: now,
         },
       });
@@ -1698,7 +1744,7 @@ export class BookingService {
     // What was actually ordered, for the itemised invoice.
     const orderIds = filteredOrders.map((order) => stringifyId(order._id)).filter((id): id is string => Boolean(id));
     const itemDocs = orderIds.length
-      ? await db.collection("order_items").find({ order_id: { $in: orderIds } }).toArray()
+      ? await db.collection("order_items").find({ order_id: { $in: filteredOrders.map((order) => order._id) } } as any).toArray()
       : [];
     const menuKeys = Array.from(new Set(itemDocs.map((item) => stringifyId(item.menu_item_id)).filter((id): id is string => Boolean(id))));
     const menuDocs = menuKeys.length
@@ -1735,7 +1781,7 @@ export class BookingService {
 
     // What prints at the top and bottom of the invoice, as set for this branch under Settings.
     const issuer = booking.outlet_id
-      ? await outletsCollection.findOne({ location_key: booking.outlet_id } as any)
+      ? await outletsCollection.findOne({ _id: booking.outlet_id } as any)
       : null;
     const invoice = {
       legal_name: normaliseString((issuer as any)?.legal_name) || normaliseString((issuer as any)?.name),
@@ -1753,6 +1799,8 @@ export class BookingService {
         outlets: serialiseEmbedded(outlet),
       },
       invoice,
+      // What the printed invoice shows, set per branch under Settings.
+      invoice_settings: await configService.getInvoiceSettings(outletKeyOf(booking.outlet_id)),
       foodTotal,
       roomTotal,
       /** Room plus food before GST. */

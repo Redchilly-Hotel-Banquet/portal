@@ -1,5 +1,6 @@
 "use client";
 
+import { optionalPhoneError } from "@/lib/phone";
 import { useReducer } from "react";
 import { differenceInCalendarDays } from "date-fns";
 import type { DateRange } from "react-day-picker";
@@ -110,9 +111,8 @@ export function validateStay(state: BookingFormState, nights: number): BookingSt
 export function validateGuest(state: BookingFormState): BookingStepErrors {
   const errors: BookingStepErrors = {};
   if (!state.name.trim()) errors.name = "Enter the guest's full name.";
-  const digits = state.phone.replace(/\D/g, "");
   if (!state.phone.trim()) errors.phone = "Enter a phone number.";
-  else if (digits.length < 10 || digits.length > 15) errors.phone = "Enter a valid phone number with 10 to 15 digits.";
+  else if (optionalPhoneError(state.phone)) errors.phone = "Enter a valid phone number for the country you chose.";
   if (state.email.trim() && !EMAIL.test(state.email.trim())) errors.email = "Enter a valid email address.";
   return errors;
 }

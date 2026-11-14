@@ -2,6 +2,7 @@ import { mongoConnection } from "../../mongo";
 import { HttpError } from "../../httpError";
 import { AuthenticatedUser } from "../../session";
 import { canAccessOutlet, outletFilter } from "../../utils/access";
+import { outletDirectory, outletKeyOf } from "../../utils/outlets";
 import { businessDayStart } from "../../utils/dates";
 import { assignedRoomIds } from "../../utils/roomAssignments";
 
@@ -207,13 +208,13 @@ export class AnalyticsService {
     // "Today" is the kitchen's trading day (from 3 am India time), the same one the Orders screen shows.
     const midnight = businessDayStart();
 
-    const outletFilter = !user.outlets.includes("all") ? { outlet_id: { $in: user.outlets } } : {};
+    const outletFilter = !user.outlets.includes("all") ? { outlet_id: { $in: outletDirectory.idsOf(user.outlets) } } : {};
 
     const orders = await ordersCollection
       .find({ ...outletFilter, ...inRange("created_at") }, { projection: { outlet_id: 1, total: 1, subtotal: 1, created_at: 1 } })
       .toArray();
     orders.forEach((order: any) => {
-      const outletId = order.outlet_id ?? "UNKNOWN";
+      const outletId = (outletKeyOf(order.outlet_id) ?? "UNKNOWN");
       if (!buckets.has(outletId)) {
         buckets.set(outletId, {
           outlet_id: outletId,
@@ -243,12 +244,12 @@ export class AnalyticsService {
       }
     });
 
-    const bookingsFilter = !user.outlets.includes("all") ? { outlet_id: { $in: user.outlets } } : {};
+    const bookingsFilter = !user.outlets.includes("all") ? { outlet_id: { $in: outletDirectory.idsOf(user.outlets) } } : {};
     const bookings = await bookingsCollection
       .find({ ...bookingsFilter, ...inRange("created_at") }, { projection: { outlet_id: 1, total_amount: 1 } })
       .toArray();
     bookings.forEach((booking: any) => {
-      const outletId = booking.outlet_id ?? "UNKNOWN";
+      const outletId = (outletKeyOf(booking.outlet_id) ?? "UNKNOWN");
       if (!buckets.has(outletId)) {
         buckets.set(outletId, {
           outlet_id: outletId,
@@ -297,7 +298,7 @@ export class AnalyticsService {
       .find({ ...bookingsFilter, status: { $in: ["CONFIRMED", "CHECKED_IN"] } }, { projection: { outlet_id: 1 } })
       .toArray();
     active.forEach((booking: any) => {
-      bucketFor(booking.outlet_id ?? "UNKNOWN").active_bookings += 1;
+      bucketFor((outletKeyOf(booking.outlet_id) ?? "UNKNOWN")).active_bookings += 1;
     });
 
     // Payments belong to the period in which they were received, not the period the booking was made.
@@ -305,7 +306,7 @@ export class AnalyticsService {
       .find({ ...bookingsFilter, status: "CHECKED_OUT", payments: { $exists: true, $ne: [] }, ...inRange("paid_at") }, { projection: { outlet_id: 1, payments: 1, "gst.gst": 1 } })
       .toArray();
     paid.forEach((booking: any) => {
-      const bucket = bucketFor(booking.outlet_id ?? "UNKNOWN");
+      const bucket = bucketFor((outletKeyOf(booking.outlet_id) ?? "UNKNOWN"));
       for (const payment of booking.payments) {
         const mode = String(payment?.mode ?? "OTHER");
         bucket.payments_by_mode[mode] = (bucket.payments_by_mode[mode] ?? 0) + toNumber(payment?.amount);
@@ -314,10 +315,10 @@ export class AnalyticsService {
       bucket.gst_collected += toNumber(booking.gst?.gst);
     });
 
-    const roomsFilter = !user.outlets.includes("all") ? { outlet_id: { $in: user.outlets } } : {};
+    const roomsFilter = !user.outlets.includes("all") ? { outlet_id: { $in: outletDirectory.idsOf(user.outlets) } } : {};
     const rooms = await roomsCollection.find({ is_active: { $ne: false }, ...roomsFilter }, { projection: { outlet_id: 1, type: 1 } }).toArray();
     rooms.forEach((room: any) => {
-      const outletId = room.outlet_id ?? "UNKNOWN";
+      const outletId = (outletKeyOf(room.outlet_id) ?? "UNKNOWN");
       if (!buckets.has(outletId)) {
         buckets.set(outletId, {
           outlet_id: outletId,

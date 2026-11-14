@@ -17,6 +17,10 @@ export const toObjectId = (value: unknown): ObjectId | null => {
   }
 };
 
+/** ObjectIds for a list of ids (hex text or ObjectId); entries that are not ids are left out. */
+export const toObjectIds = (values: unknown[]): ObjectId[] =>
+  values.map((value) => toObjectId(value)).filter((id): id is ObjectId => id !== null);
+
 export const stringifyId = (value: unknown): string | null => {
   if (!value) return null;
   if (typeof value === "string") {

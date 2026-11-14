@@ -2,6 +2,7 @@ import { mongoConnection } from "../../mongo";
 import { assertCheckinId, findCheckedInBookingForRoom } from "../../utils/checkinId";
 import { HttpError } from "../../httpError";
 import { stringifyId, toObjectId } from "../../utils/objectId";
+import { outletKeyOf } from "../../utils/outlets";
 import {
   BookingSummary,
   LocationSummary,
@@ -25,7 +26,7 @@ const normalizeLocation = (doc: any): LocationSummary | null => {
     id: stringifyId(doc._id) ?? stringifyId(doc.id) ?? "",
     code: doc.code,
     type: doc.type,
-    outlet_id: doc.outlet_id,
+    outlet_id: outletKeyOf(doc.outlet_id) ?? doc.outlet_id,
   };
 };
 
@@ -100,7 +101,7 @@ export class LocationService {
       code: trimmedCode,
       type: normalizedType,
       is_active: true,
-      outlet_id: resolvedOutletKey,
+      outlet_id: outletDoc._id,
     });
 
     if (!locationDoc) {

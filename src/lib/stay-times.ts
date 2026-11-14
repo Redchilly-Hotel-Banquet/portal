@@ -16,6 +16,10 @@ export const formatClock = (value: string): string => {
   return `${hours % 12 || 12}:${String(minutes).padStart(2, "0")} ${hours < 12 ? "AM" : "PM"}`;
 };
 
+/** The check-in time quoted in guest messages: its own setting, falling back to the real check-in time. */
+export const messageCheckinTime = (source?: Partial<Record<string, unknown>> | null): string =>
+  normaliseClock(source?.message_checkin_time, resolveStayTimes(source as any).checkin_time);
+
 export const resolveStayTimes = (source?: Partial<Record<keyof StayTimes, unknown>> | null): StayTimes => ({
   checkin_time: normaliseClock(source?.checkin_time, DEFAULT_STAY_TIMES.checkin_time),
   checkout_time: normaliseClock(source?.checkout_time, DEFAULT_STAY_TIMES.checkout_time),

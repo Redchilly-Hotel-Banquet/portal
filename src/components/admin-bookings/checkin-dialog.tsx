@@ -1,12 +1,13 @@
 "use client";
 
-import { Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2 } from "lucide-react";
 import { formatDateTime } from "@/components/admin/format";
 import { StatusBadge } from "@/components/admin/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { PhoneInput } from "@/components/ui/phone-input";
 import { Label } from "@/components/ui/label";
 import { optionalPhoneError } from "@/lib/phone";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -73,7 +74,7 @@ function Body({ booking }: { booking: Booking }) {
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
             <Label htmlFor="contact-phone">Phone number</Label>
-            <Input id="contact-phone" type="tel" inputMode="tel" value={manager.contactPhone} onChange={(e) => manager.setContactPhone(e.target.value)} placeholder="10-digit mobile number" autoComplete="off" aria-invalid={Boolean(optionalPhoneError(manager.contactPhone))} />
+            <PhoneInput id="contact-phone" invalid={Boolean(optionalPhoneError(manager.contactPhone))} value={manager.contactPhone} onChange={(v) => manager.setContactPhone(v)} />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="contact-email">Email</Label>
@@ -164,9 +165,9 @@ function Body({ booking }: { booking: Booking }) {
   );
 }
 
-type Props = { booking: Booking | null; onClose: () => void };
+type Props = { booking: Booking | null; onClose: () => void; /** Set when check-in was opened straight from a new reservation: goes back to that form. */ onBack?: () => void; backBusy?: boolean };
 
-export function CheckinDialog({ booking, onClose }: Props) {
+export function CheckinDialog({ booking, onClose, onBack, backBusy }: Props) {
   return (
     <Dialog open={booking !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto">
@@ -174,7 +175,14 @@ export function CheckinDialog({ booking, onClose }: Props) {
           <DialogTitle>Check-in</DialogTitle>
           <DialogDescription>Capture guest details and signatures, allocate rooms and complete arrival.</DialogDescription>
         </DialogHeader>
-        {booking ? <Body key={booking.id} booking={booking} /> : null}
+        {booking ? <>
+            {onBack ? (
+              <Button type="button" variant="ghost" size="sm" className="-mt-2 w-fit self-start" onClick={onBack} disabled={backBusy}>
+                {backBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden /> : <ArrowLeft className="mr-2 h-4 w-4" aria-hidden />}Back to reservation
+              </Button>
+            ) : null}
+            <Body key={booking.id} booking={booking} />
+          </> : null}
       </DialogContent>
     </Dialog>
   );

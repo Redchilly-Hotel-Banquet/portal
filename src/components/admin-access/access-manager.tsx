@@ -1,5 +1,6 @@
 "use client";
 
+import { formatPhone } from "@/lib/phone";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Eye, Info, KeyRound, Loader2, Plus, Search, Trash2, UserCog } from "lucide-react";
@@ -179,7 +180,7 @@ function AccountsTab({ branches }: { branches: BranchOption[] }) {
                 <span className="min-w-0">
                   <span className="block truncate font-medium">{guest.name || "Guest"}</span>
                   <span className="block truncate text-xs text-muted-foreground">
-                    {[guest.phone, guest.email].filter(Boolean).join(" · ") || "No contact on file"} · {guest.bookings} booking{guest.bookings === 1 ? "" : "s"}
+                    {[formatPhone(guest.phone), guest.email].filter(Boolean).join(" · ") || "No contact on file"} · {guest.bookings} booking{guest.bookings === 1 ? "" : "s"}
                   </span>
                 </span>
                 <Button size="sm" variant="ghost" onClick={() => setViewing({ kind: "guest", key: guest.key, name: guest.name, email: guest.email, phone: guest.phone })}>

@@ -4,8 +4,8 @@ import { mongoConnection } from "../../mongo";
 import type { AuthenticatedUser } from "../../session";
 import { USERS_COLLECTION, STAFF_ROLES, userService } from "../users/user.service";
 import { stringifyId } from "../../utils/objectId";
-import { tenDigitPhone } from "../../../lib/phone";
-import { phonePattern } from "../users/user.service";
+import { outletDirectory, outletKeyOf } from "../../utils/outlets";
+import { normalisePhone } from "../../../lib/phone";
 import { isSuperOwnerEmail } from "../../../lib/super-owner";
 import { revealPassword, storePassword } from "../../utils/password";
 
@@ -48,16 +48,14 @@ const cleanRoles = (raw: unknown): string[] => {
 };
 
 /** Branches by their real keys (matched ignoring case and spaces). "all" means every branch. */
-const cleanOutlets = async (raw: unknown, roles: string[]): Promise<string[]> => {
-  const values = (Array.isArray(raw) ? raw : []).map((value) => String(value).trim()).filter(Boolean);
+const cleanOutlets = async (raw: unknown, roles: string[]): Promise<Array<ObjectId | "all">> => {
+  const values = (Array.isArray(raw) ? raw : []).map((value) => stringifyId(value) ?? "").filter(Boolean);
   if (values.some((value) => norm(value) === "all")) return ["all"];
-  const keys = (await mongoConnection.getDb().collection("outlets").find({}, { projection: { location_key: 1 } }).toArray()).map((doc) =>
-    String(doc.location_key ?? ""),
-  );
+  await outletDirectory.load();
   const resolved = values.map((value) => {
-    const key = keys.find((candidate) => norm(candidate) === norm(value));
-    if (!key) throw new HttpError(400, `"${value}" is not a branch.`);
-    return key;
+    const id = outletDirectory.idOf(value);
+    if (!id) throw new HttpError(400, `"${value}" is not a branch.`);
+    return id;
   });
   if (roles.length > 0 && resolved.length === 0) throw new HttpError(400, "Choose at least one branch, or All branches.");
   return Array.from(new Set(resolved));
@@ -81,13 +79,16 @@ const assertSafeAdminChange = async (caller: AuthenticatedUser, targetId: string
   if ((await otherActiveAdmins(targetId)) < 1) throw new HttpError(409, "At least one active administrator must remain.");
 };
 
+/** Stored branch ids as the keys the screens show; "all" stays. */
+const presentOutlets = (list: unknown): string[] => (Array.isArray(list) ? list.map((entry) => outletKeyOf(entry) ?? String(entry)) : []);
+
 const presentUser = (doc: Record<string, any>) => ({
   id: stringifyId(doc._id) ?? "",
   email: doc.email ?? "",
   name: doc.name ?? "",
   picture: doc.picture ?? null,
   roles: Array.isArray(doc.roles) ? doc.roles : [],
-  outlets: Array.isArray(doc.outlets) ? doc.outlets : [],
+  outlets: presentOutlets(doc.outlets),
   isActive: doc.isActive !== false,
 });
 
@@ -95,7 +96,7 @@ const presentLogin = (doc: Record<string, any>) => ({
   id: stringifyId(doc._id) ?? "",
   name: doc.name ?? "",
   roles: Array.isArray(doc.purpose) ? doc.purpose : [],
-  outlets: Array.isArray(doc.outlets) ? doc.outlets : [],
+  outlets: presentOutlets(doc.outlets),
   isActive: doc.isActive !== false,
   hasPassword: typeof doc.adminPassword === "string" && doc.adminPassword.length > 0,
   passwordUpdatedAt: doc.password_updated_at ?? null,
@@ -127,8 +128,8 @@ const guestInfo = async (key: string) => {
   const value = key.slice(2);
   let filter: Record<string, unknown>;
   let header: { name: string; phone: string; email: string };
-  if (kind === "p:" && /^\d{10}$/.test(value)) {
-    filter = { guest_phone: { $regex: phonePattern(value) } };
+  if (kind === "p:" && /^\+\d{8,15}$/.test(value)) {
+    filter = { guest_phone: value };
     header = { name: "", phone: value, email: "" };
   } else if (kind === "e:" && value) {
     filter = { guest_email: { $regex: `^${escapeRegex(value)}$`, $options: "i" } };
@@ -159,7 +160,7 @@ const analyticsFor = async (bookingFilter: Record<string, unknown>, who: Record<
 
   const outletNames = new Map<string, string>();
   for (const outlet of await db().collection("outlets").find({}).project({ location_key: 1, name: 1 }).toArray()) {
-    if (outlet.location_key) outletNames.set(String(outlet.location_key), String(outlet.name ?? outlet.location_key));
+    if (outlet.location_key) outletNames.set(String(outlet._id), String(outlet.name ?? outlet.location_key));
   }
 
   const byStatus: Record<string, number> = {};
@@ -173,7 +174,7 @@ const analyticsFor = async (bookingFilter: Record<string, unknown>, who: Record<
   for (const booking of bookings) {
     const status = String(booking.status ?? "CONFIRMED").toUpperCase().replace("PENDING", "CONFIRMED");
     byStatus[status] = (byStatus[status] ?? 0) + 1;
-    const branch = outletNames.get(String(booking.outlet_id)) ?? String(booking.outlet_id ?? "");
+    const branch = outletNames.get(String(booking.outlet_id)) ?? outletKeyOf(booking.outlet_id) ?? "";
     if (status !== "CANCELLED") branches.set(branch, (branches.get(branch) ?? 0) + 1);
     if (status === "CHECKED_OUT") {
       nights += num(booking.nights);
@@ -192,11 +193,11 @@ const analyticsFor = async (bookingFilter: Record<string, unknown>, who: Record<
   }
 
   // Food ordered to their rooms during those stays.
-  const bookingIds = bookings.map((booking) => String(booking._id));
+  const bookingIds = bookings.map((booking) => booking._id);
   const orders = bookingIds.length
     ? await db().collection("orders").find({ booking_id: { $in: bookingIds }, status: { $in: ["PENDING", "ACCEPTED", "PREPARING", "READY", "DELIVERED", "ORDER_FINISHED"] } }).toArray()
     : [];
-  const orderIds = orders.map((order) => String(order._id));
+  const orderIds = orders.map((order) => order._id);
   const lines = orderIds.length ? await db().collection("order_items").find({ order_id: { $in: orderIds } }).toArray() : [];
   const dishCounts = new Map<string, number>();
   for (const line of lines) dishCounts.set(String(line.menu_item_id), (dishCounts.get(String(line.menu_item_id)) ?? 0) + num(line.quantity));
@@ -231,7 +232,7 @@ const analyticsFor = async (bookingFilter: Record<string, unknown>, who: Record<
     recent: bookings.slice(0, 10).map((booking) => ({
       id: stringifyId(booking._id) ?? "",
       code: booking.booking_code ?? "",
-      branch: outletNames.get(String(booking.outlet_id)) ?? String(booking.outlet_id ?? ""),
+      branch: outletNames.get(String(booking.outlet_id)) ?? outletKeyOf(booking.outlet_id) ?? "",
       status: String(booking.status ?? ""),
       checkIn: booking.check_in_date ?? null,
       checkOut: booking.check_out_date ?? null,
@@ -286,7 +287,7 @@ export const accessService = {
           const email = String(booking.guest_email ?? "").trim().toLowerCase();
           if (email && accountEmails.has(email)) continue; // already an account: found above
           if (isHiddenEmail(email)) continue;
-          const ten = tenDigitPhone(booking.guest_phone);
+          const ten = normalisePhone(booking.guest_phone);
           const key = ten ? `p:${ten}` : email ? `e:${email}` : `n:${String(booking.guest_name ?? "").trim().toLowerCase()}`;
           if (key === "n:") continue;
           const group = groups.get(key) ?? { key, name: String(booking.guest_name ?? ""), phone: ten ?? String(booking.guest_phone ?? ""), email, bookings: 0, lastBooked: booking.created_at ?? null };

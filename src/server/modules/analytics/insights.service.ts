@@ -1,8 +1,11 @@
+import { outletDirectory, outletKeyOf } from "../../utils/outlets";
+import { categoryNames } from "../../utils/menuRefs";
+import { toObjectIds } from "../../utils/objectId";
 import { ObjectId } from "mongodb";
 import { mongoConnection } from "../../mongo";
 import { HttpError } from "../../httpError";
 import type { AuthenticatedUser } from "../../session";
-import { tenDigitPhone } from "../../../lib/phone";
+import { normalisePhone } from "../../../lib/phone";
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -82,7 +85,7 @@ export class InsightsService {
   /** The account's branches, narrowed to the ones chosen in the filter (never widened past what it may see). */
   private scope(user: AuthenticatedUser, window: { from: Date; to: Date } | null, chosen: string[]) {
     const allowed = user.outlets.includes("all") ? chosen : chosen.length ? chosen.filter((key) => user.outlets.includes(key)) : user.outlets;
-    const outlet = user.outlets.includes("all") && chosen.length === 0 ? {} : { outlet_id: { $in: allowed } };
+    const outlet = user.outlets.includes("all") && chosen.length === 0 ? {} : { outlet_id: { $in: outletDirectory.idsOf(allowed) } };
     return { ...outlet, ...(window ? { created_at: { $gte: window.from, $lt: window.to } } : {}) };
   }
 
@@ -92,7 +95,7 @@ export class InsightsService {
     const byBooking = new Map<string, any[]>();
     for (let i = 0; i < bookingIds.length; i += 1000) {
       const chunk = bookingIds.slice(i, i + 1000);
-      const orders = await db.collection("orders").find({ booking_id: { $in: chunk } }, { projection: { booking_id: 1, status: 1, total: 1, subtotal: 1 } }).toArray();
+      const orders = await db.collection("orders").find({ booking_id: { $in: toObjectIds(chunk) } }, { projection: { booking_id: 1, status: 1, total: 1, subtotal: 1 } }).toArray();
       for (const order of orders) {
         if (isCancelled(order.status)) continue;
         const key = String(order.booking_id);
@@ -127,7 +130,7 @@ export class InsightsService {
     const guests = new Map<string, Guest>();
 
     for (const booking of bookings) {
-      const phone = tenDigitPhone(booking.guest_phone);
+      const phone = normalisePhone(booking.guest_phone);
       const email = String(booking.guest_email ?? "").trim().toLowerCase();
       const key = booking.user_id ? `u:${booking.user_id}` : phone ? `p:${phone}` : email ? `e:${email}` : `n:${String(booking.guest_name ?? "").trim().toLowerCase()}`;
       if (key === "n:") continue;
@@ -212,7 +215,7 @@ export class InsightsService {
       if (!row) continue;
       row.bookings += 1;
       row.room_income += amount;
-      const branch = branchOf(booking.outlet_id);
+      const branch = branchOf(outletKeyOf(booking.outlet_id));
       branch.bookings += 1;
       branch.room_income += amount;
       const types = roomTypesOf(booking);
@@ -232,16 +235,16 @@ export class InsightsService {
       if (!row) continue;
       row.food_orders += 1;
       row.food_income += amount;
-      const branch = branchOf(order.outlet_id);
+      const branch = branchOf(outletKeyOf(order.outlet_id));
       branch.food_orders += 1;
       branch.food_income += amount;
     }
 
     // Most sold dishes: quantities and sales from the order lines of this year's orders.
     const sold = new Map<string, { quantity: number; sales: number }>();
-    const orderIds = orders.map((order) => String(order._id));
+    const orderIds = orders.map((order) => order._id);
     for (let i = 0; i < orderIds.length; i += 1000) {
-      const lines = await db.collection("order_items").find({ order_id: { $in: orderIds.slice(i, i + 1000) } }).toArray();
+      const lines = await db.collection("order_items").find({ order_id: { $in: orderIds.slice(i, i + 1000) } } as any).toArray();
       for (const line of lines) {
         const key = String(line.menu_item_id);
         const entry = sold.get(key) ?? { quantity: 0, sales: 0 };
@@ -254,19 +257,20 @@ export class InsightsService {
     const menu = rawIds.length
       ? await db
           .collection("menu_items")
-          .find({ _id: { $in: rawIds.flatMap((id) => { try { return [id, new ObjectId(id)]; } catch { return [id]; } }) } as any }, { projection: { name: 1, category: 1 } })
+          .find({ _id: { $in: rawIds.flatMap((id) => { try { return [id, new ObjectId(id)]; } catch { return [id]; } }) } as any }, { projection: { name: 1, category_id: 1 } })
           .toArray()
       : [];
     const menuById = new Map(menu.map((doc: any) => [String(doc._id), doc]));
+    const names = await categoryNames(db);
     // Dishes that have since been deleted from the menu are not listed, so there is no "Removed item" row.
     const liveIds = rawIds.filter((id) => menuById.has(id));
     const items = liveIds
-      .map((id) => ({ name: String(menuById.get(id)?.name ?? ""), category: String(menuById.get(id)?.category ?? ""), ...sold.get(id)! }))
+      .map((id) => ({ name: String(menuById.get(id)?.name ?? ""), category: names.get(String(menuById.get(id)?.category_id ?? "")) ?? "", ...sold.get(id)! }))
       .sort((a, b) => b.quantity - a.quantity)
       .slice(0, TOP_ITEMS);
 
     const categories: Record<string, number> = {};
-    for (const id of liveIds) bump(categories, String(menuById.get(id)?.category ?? "Other") || "Other", sold.get(id)!.sales);
+    for (const id of liveIds) bump(categories, (names.get(String(menuById.get(id)?.category_id ?? "")) ?? "Other") || "Other", sold.get(id)!.sales);
 
     const outlets = await db.collection("outlets").find({}).project({ location_key: 1, name: 1 }).toArray();
     const outletName = new Map(outlets.map((outlet: any) => [String(outlet.location_key), String(outlet.name ?? outlet.location_key)]));

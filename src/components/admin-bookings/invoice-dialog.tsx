@@ -5,13 +5,15 @@ import { createPortal } from "react-dom";
 import { Printer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { normaliseInvoiceSettings, PAPER_SIZES } from "@/lib/invoice-settings";
 import { InvoiceDocument } from "./invoice-document";
 import type { BillingSummary } from "./types";
 
-const PRINT_CSS = `
+/** The print rules for the branch's chosen paper and margin (Settings → Configuration → Invoice). */
+export const printCss = (paper: string, margin: number) => `
 .invoice-print-root { display: none; }
 @media print {
-  @page { margin: 12mm; }
+  @page { size: ${paper}; margin: ${margin}mm; }
   body > *:not(.invoice-print-root) { display: none !important; }
   .invoice-print-root { display: block !important; }
   .invoice-print-root .invoice-sheet { padding: 0 2px 0 0; box-sizing: border-box; background: #fff; }
@@ -25,6 +27,7 @@ type Props = { summary: BillingSummary | null; open: boolean; onOpenChange: (ope
 
 export function InvoiceDialog({ summary, open, onOpenChange }: Props) {
   const [mounted, setMounted] = useState(false);
+  const invoiceSettings = normaliseInvoiceSettings(summary?.invoice_settings);
   useEffect(() => setMounted(true), []);
 
   return (
@@ -50,7 +53,7 @@ export function InvoiceDialog({ summary, open, onOpenChange }: Props) {
             {mounted
               ? createPortal(
                   <div className="invoice-print-root">
-                    <style>{PRINT_CSS}</style>
+                    <style>{printCss(PAPER_SIZES[invoiceSettings.paper].css, invoiceSettings.margin_mm)}</style>
                     <InvoiceDocument summary={summary} />
                   </div>,
                   document.body,

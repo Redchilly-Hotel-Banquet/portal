@@ -1,6 +1,7 @@
 import { ObjectId } from "mongodb";
 import { HttpError } from "../../httpError";
-import { canAccessOutlet } from "../../utils/access";
+import { canAccessOutlet, outletFilter } from "../../utils/access";
+import { outletKeyOf } from "../../utils/outlets";
 import { mongoConnection } from "../../mongo";
 import type { AuthenticatedUser } from "../../session";
 import { stringifyId, toObjectId } from "../../utils/objectId";
@@ -38,7 +39,7 @@ export const phoneOrderService = {
   async stays(db: ReturnType<typeof mongoConnection.getDb>, user: AuthenticatedUser) {
     const bookings = await db
       .collection("bookings")
-      .find({ status: "CHECKED_IN", ...(user.outlets.includes("all") ? {} : { outlet_id: { $in: user.outlets } }) })
+      .find({ status: "CHECKED_IN", ...outletFilter(user) })
       .project({ guest_name: 1, booking_code: 1, outlet_id: 1, room_id: 1, room_ids: 1, rooms_allocated: 1, checkin_details: 1 })
       .toArray();
 
@@ -57,7 +58,7 @@ export const phoneOrderService = {
           bookingId: stringifyId(booking._id) ?? "",
           bookingCode: booking.booking_code ?? "",
           guestName: booking.guest_name ?? "",
-          outletId: booking.outlet_id ?? "",
+          outletId: outletKeyOf(booking.outlet_id) ?? "",
           rooms: currentRoomIds(booking).map((id) => ({ id, code: codeById.get(id) ?? "" })),
         }))
         .filter((stay) => stay.bookingId && stay.rooms.length > 0),
@@ -117,20 +118,20 @@ export const phoneOrderService = {
     await db.collection("orders").insertOne({
       _id: orderId,
       outlet_id: booking.outlet_id,
-      room_table_id: roomId,
-      booking_id: stringifyId(booking._id),
+      room_table_id: toObjectId(roomId),
+      booking_id: booking._id,
       special_instructions: typeof request.specialInstructions === "string" ? request.specialInstructions.trim().slice(0, 500) || null : null,
       subtotal,
       total: subtotal,
-      status: request.delivered ? "DELIVERED" : "PENDING",
+      status: request.delivered ? "DELIVERED" : "ACCEPTED",
       ...(request.delivered ? { delivered_at: now } : {}),
       source: "PHONE",
-      placed_by: { id: user.id, name: user.name },
+      placed_by: { id: toObjectId(user.id) ?? user.id, name: user.name },
       created_at: now,
       updated_at: now,
     } as any);
     await db.collection("order_items").insertMany(
-      orderItems.map((item) => ({ ...item, order_id: orderId.toHexString(), created_at: now })) as any,
+      orderItems.map((item) => ({ ...item, order_id: orderId, created_at: now })) as any,
     );
     return { orderId: orderId.toHexString(), total: subtotal };
   },

@@ -8,8 +8,10 @@ import { AdminShell } from "@/components/admin/admin-shell";
 import { EmptyState } from "@/components/admin/empty-state";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PhoneInput } from "@/components/ui/phone-input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { UsagePanel } from "./usage-panel";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
@@ -18,7 +20,7 @@ import { toBranch, type Branch, type WifiFloorRow } from "@/components/admin-bra
 import { getAdminOutlets, hasOutletAccess } from "@/hooks/useAdminAccess";
 import { apiPost } from "@/lib/apiClient";
 import { MAX_FLOORS, floorLabel, floorOptions } from "@/lib/floors";
-import { DEFAULT_STAY_TIMES, formatClock, isClock, resolveStayTimes } from "@/lib/stay-times";
+import { DEFAULT_STAY_TIMES, formatClock, isClock, messageCheckinTime, resolveStayTimes } from "@/lib/stay-times";
 import { variablesForOutlet, type TemplateVariable } from "@/lib/template-variables";
 import { DEFAULT_WHATSAPP_TEMPLATE, TEMPLATE_PLACEHOLDERS, renderTemplate } from "@/lib/whatsapp-template";
 
@@ -40,6 +42,7 @@ type Form = {
   whatsapp_template: string;
   checkin_time: string;
   checkout_time: string;
+  message_checkin_time: string;
 };
 
 const fromBranch = (b: Branch): Form => ({
@@ -57,6 +60,7 @@ const fromBranch = (b: Branch): Form => ({
   whatsapp_template: b.whatsapp_template,
   checkin_time: b.checkin_time || DEFAULT_STAY_TIMES.checkin_time,
   checkout_time: b.checkout_time || DEFAULT_STAY_TIMES.checkout_time,
+  message_checkin_time: b.message_checkin_time,
 });
 
 const GSTIN = /^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
@@ -125,7 +129,7 @@ export function SettingsManager() {
   });
   const branchVariables = useMemo(() => Object.entries(variablesForOutlet(variablesQuery.data ?? [], branchKey)), [variablesQuery.data, branchKey]);
 
-  const timeError = form && (!isClock(form.checkin_time) || !isClock(form.checkout_time)) ? "Enter both times, for example 14:00 and 11:00." : "";
+  const timeError = form && (!isClock(form.checkin_time) || !isClock(form.checkout_time) || (form.message_checkin_time !== "" && !isClock(form.message_checkin_time))) ? "Enter both times, for example 14:00 and 11:00." : "";
 
   const save = useMutation({
     mutationFn: () =>
@@ -142,6 +146,7 @@ export function SettingsManager() {
             whatsapp_template: form?.whatsapp_template.trim() === DEFAULT_WHATSAPP_TEMPLATE ? "" : form?.whatsapp_template,
             checkin_time: form?.checkin_time,
             checkout_time: form?.checkout_time,
+            message_checkin_time: form?.message_checkin_time,
           },
         },
         true,
@@ -169,7 +174,7 @@ export function SettingsManager() {
       checkin_id: "123456",
       wifi: [name ? `Wi-Fi: ${name}` : "", password ? `Wi-Fi password: ${password}` : ""].filter(Boolean).join("\n"),
       note: form.welcome_message,
-      checkin_time: formatClock(times.checkin_time),
+      checkin_time: formatClock(messageCheckinTime(form)),
       checkout_time: formatClock(times.checkout_time),
     });
   }, [form, branch, branchVariables]);
@@ -180,8 +185,10 @@ export function SettingsManager() {
         <TabsList>
           <TabsTrigger value="branch">Branch details</TabsTrigger>
           <TabsTrigger value="config">Configuration</TabsTrigger>
+          <TabsTrigger value="usage">Storage &amp; usage</TabsTrigger>
         </TabsList>
         <TabsContent value="config" className="mt-0"><ConfigPanel /></TabsContent>
+        <TabsContent value="usage" className="mt-0"><UsagePanel /></TabsContent>
         <TabsContent value="branch" className="mt-0">
       {isLoading ? (
         <Skeleton className="h-64 w-full" />
@@ -237,7 +244,7 @@ export function SettingsManager() {
                 </Field>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field id="s-phone" label="Phone on invoices">
-                    <Input id="s-phone" type="tel" value={form.invoice_phone} onChange={(e) => set("invoice_phone", e.target.value)} placeholder={branch?.contact_number} />
+                    <PhoneInput id="s-phone" value={form.invoice_phone} onChange={(v) => set("invoice_phone", v)} />
                   </Field>
                   <Field id="s-email" label="Email on invoices">
                     <Input id="s-email" type="email" value={form.invoice_email} onChange={(e) => set("invoice_email", e.target.value)} placeholder={branch?.contact_email} />
@@ -252,11 +259,14 @@ export function SettingsManager() {
               <TabsContent value="times" className="mt-0">
               <Section title="Check-in and check-out times" description="When a stay at this branch starts and ends each day, in India time. A booking can only be checked in from its check-in day at the check-in time until its check-out day at the check-out time. After that, reception marks it Cancelled or Checked out.">
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <Field id="s-checkin-time" label="Check-in time">
+                  <Field id="s-checkin-time" label="Check-in time (for reception)" hint="The earliest moment reception can mark a guest as checked in.">
                     <Input id="s-checkin-time" type="time" required value={form.checkin_time} onChange={(e) => set("checkin_time", e.target.value)} />
                   </Field>
-                  <Field id="s-checkout-time" label="Check-out time" hint="Also available in the message as {checkin_time} and {checkout_time}.">
+                  <Field id="s-checkout-time" label="Check-out time" hint="Quoted in the message as {checkout_time}.">
                     <Input id="s-checkout-time" type="time" required value={form.checkout_time} onChange={(e) => set("checkout_time", e.target.value)} />
+                  </Field>
+                  <Field id="s-message-checkin-time" label="Check-in time (for the guest message)" hint="Quoted in the WhatsApp message as {checkin_time}. Leave blank to use the reception check-in time.">
+                    <Input id="s-message-checkin-time" type="time" value={form.message_checkin_time} onChange={(e) => set("message_checkin_time", e.target.value)} />
                   </Field>
                 </div>
                 {timeError ? <p role="alert" className="text-xs text-destructive">{timeError}</p> : null}

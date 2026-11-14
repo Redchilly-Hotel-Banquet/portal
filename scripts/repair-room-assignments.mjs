@@ -7,7 +7,7 @@
 //
 // Orders placed to a room the booking no longer holds are moved to the room it does hold, but only when
 // that is unambiguous (the booking holds exactly one room). Anything else is reported, not changed.
-import { MongoClient } from "mongodb";
+import { MongoClient, ObjectId } from "mongodb";
 import { writeFileSync } from "node:fs";
 
 const apply = process.argv.includes("--apply");
@@ -15,6 +15,8 @@ const client = new MongoClient(process.env.MONGO_DB_URI);
 await client.connect();
 const db = client.db(process.env.MONGO_DB_NAME);
 
+// rooms and orders are linked by _id
+const oid = (value) => (/^[0-9a-f]{24}$/i.test(String(value)) ? new ObjectId(String(value)) : value);
 const str = (value) => (value == null ? null : String(value));
 const uniq = (values) => Array.from(new Set(values.filter(Boolean).map(String)));
 
@@ -37,14 +39,14 @@ for (const booking of bookings) {
   if (stale.length === 0 && !primaryWrong) continue;
 
   const patch = {
-    room_id: expected[0],
-    room_ids: expected,
+    room_id: oid(expected[0]),
+    room_ids: expected.map(oid),
     rooms_allocated: (booking.rooms_allocated ?? []).map((line) =>
       line.room_id && !expected.includes(String(line.room_id)) ? { ...line, room_id: null, code: null, assigned_at: null } : line,
     ),
   };
 
-  const orders = await db.collection("orders").find({ booking_id: String(booking._id), room_table_id: { $in: stale } }).toArray();
+  const orders = await db.collection("orders").find({ booking_id: booking._id, room_table_id: { $in: stale.map(oid) } }).toArray();
   const movable = expected.length === 1;
   report.push({
     booking: booking.booking_code,
@@ -59,7 +61,7 @@ for (const booking of bookings) {
     if (movable) {
       for (const order of orders) {
         backups.orders.push({ _id: order._id, room_table_id: order.room_table_id });
-        await db.collection("orders").updateOne({ _id: order._id }, { $set: { room_table_id: expected[0] } });
+        await db.collection("orders").updateOne({ _id: order._id }, { $set: { room_table_id: oid(expected[0]) } });
       }
     }
   }

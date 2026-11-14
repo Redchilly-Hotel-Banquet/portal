@@ -6,11 +6,16 @@ import { CircleCheck, ImagePlus } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PhoneInput } from "@/components/ui/phone-input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Field, fieldDescribedBy } from "../field";
 import { compressImage } from "../compress-image";
-import { DOCUMENT_TYPES, type GuestEntry } from "./types";
+import type { GuestEntry } from "./types";
+import { DocumentPhotos } from "./document-photos";
+import { useDocumentTypes } from "@/hooks/useDocumentTypes";
+import { photoSpecsFor } from "@/lib/document-types";
+import { sideImage, withSideImage } from "@/lib/document-photos";
 import type { CheckinErrors } from "./use-checkin-form";
 
 interface GuestsStepProps {
@@ -46,33 +51,15 @@ function GuestCard({
   onUpdate: (patch: Partial<GuestEntry>) => void;
   onRemove?: () => void;
 }) {
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [processing, setProcessing] = useState(false);
-  const config = DOCUMENT_TYPES.find((d) => d.value === guest.documentType) ?? DOCUMENT_TYPES[0];
+  const types = useDocumentTypes();
+  const config = types.find((d) => d.value === guest.documentType) ?? types[0];
+  const sides = photoSpecsFor(types, guest.documentType);
   const nameErr = errors[`${guest.key}.name`];
   const numErr = errors[`${guest.key}.number`];
   const phoneErr = errors[`${guest.key}.phone`];
   const sigErr = errors[`${guest.key}.signature`];
   const imgErr = errors[`${guest.key}.image`];
   const id = guest.key;
-
-  const handleFile = async (file?: File) => {
-    if (!file) return;
-    if (file.size > MAX_SOURCE_BYTES) {
-      toast.error("That photo is larger than 15MB. Please choose a smaller image.");
-      return;
-    }
-    setProcessing(true);
-    try {
-      const image = await compressImage(file);
-      onUpdate({ imageDataUrl: image.dataUrl, imageName: image.name, imageType: image.type });
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to process the selected file.");
-    } finally {
-      setProcessing(false);
-      if (fileRef.current) fileRef.current.value = "";
-    }
-  };
 
   return (
     <fieldset className="border border-border bg-card p-4 sm:p-5">
@@ -105,17 +92,7 @@ function GuestCard({
           error={phoneErr}
           className="sm:col-span-3"
         >
-          <Input
-            id={`${id}-phone`}
-            type="tel"
-            inputMode="tel"
-            autoComplete={index === 0 ? "tel" : "off"}
-            placeholder="10-digit mobile number"
-            value={guest.phone}
-            onChange={(e) => onUpdate({ phone: e.target.value })}
-            aria-invalid={!!phoneErr}
-            aria-describedby={fieldDescribedBy(`${id}-phone`, !!phoneErr, true)}
-          />
+          <PhoneInput id={`${id}-phone`} invalid={!!phoneErr} value={guest.phone} onChange={(v) => onUpdate({ phone: v })} />
         </Field>
         <Field id={`${id}-type`} label="Document" required className="sm:col-span-1">
           <Select value={guest.documentType} onValueChange={(documentType) => onUpdate({ documentType })}>
@@ -123,7 +100,7 @@ function GuestCard({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {DOCUMENT_TYPES.map((t) => (
+              {types.map((t) => (
                 <SelectItem key={t.value} value={t.value}>
                   {t.label}
                 </SelectItem>
@@ -144,40 +121,16 @@ function GuestCard({
         </Field>
 
         <div className="space-y-1.5 sm:col-span-3">
-          <p className="text-sm font-medium">
-            Photo of document <span aria-hidden="true" className="text-primary">*</span>
+          <DocumentPhotos
+            id={id}
+            who={`guest ${index + 1}`}
+            sides={sides}
+            images={sides.map((_, side) => sideImage(guest, side))}
+            onChange={(side, image) => onUpdate(withSideImage(guest, side, image))}
+          />
+          <p id={`${id}-file-hint`} className="text-xs text-muted-foreground">
+            JPG or PNG. Make sure the details are readable.
           </p>
-          <div className="flex flex-wrap items-center gap-4">
-            {guest.imageDataUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element -- local data URL preview
-              <img
-                src={guest.imageDataUrl}
-                alt={`Identity document for guest ${index + 1}`}
-                className="h-20 w-28 border border-border object-cover"
-              />
-            ) : (
-              <div className="flex h-20 w-28 items-center justify-center border border-dashed border-border text-muted-foreground">
-                <ImagePlus className="h-5 w-5" strokeWidth={1.75} aria-hidden="true" />
-              </div>
-            )}
-            <div className="space-y-1">
-              <input
-                ref={fileRef}
-                id={`${id}-file`}
-                type="file"
-                accept="image/*"
-                className="sr-only"
-                onChange={(e) => handleFile(e.target.files?.[0])}
-                aria-describedby={imgErr ? `${id}-file-error` : `${id}-file-hint`}
-              />
-              <Button type="button" variant="outline" size="sm" disabled={processing} onClick={() => fileRef.current?.click()}>
-                {processing ? "Processing" : guest.imageDataUrl ? "Replace photo" : "Add photo"}
-              </Button>
-              <p id={`${id}-file-hint`} className="text-xs text-muted-foreground">
-                JPG or PNG. Make sure the details are readable.
-              </p>
-            </div>
-          </div>
           {imgErr && (
             <p id={`${id}-file-error`} role="alert" className="text-xs font-medium text-destructive">
               {imgErr}

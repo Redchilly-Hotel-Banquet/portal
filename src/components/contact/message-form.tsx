@@ -6,6 +6,7 @@ import { Send } from "lucide-react";
 import { SITE } from "@/components/site/site-config";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PhoneInput } from "@/components/ui/phone-input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -46,16 +47,7 @@ export function MessageForm() {
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="contact-phone">Phone</Label>
-          <Input
-            id="contact-phone"
-            name="phone"
-            type="tel"
-            inputMode="tel"
-            autoComplete="tel"
-            placeholder="+91 9XXXXXXXXX"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-          />
+          <PhoneInput id="contact-phone" name="phone" value={phone} onChange={(v) => setPhone(v)} />
         </div>
       </div>
       <div className="space-y-1.5">

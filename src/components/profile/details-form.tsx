@@ -6,6 +6,7 @@ import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PhoneInput } from "@/components/ui/phone-input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError, apiPost } from "@/lib/apiClient";
@@ -68,15 +69,7 @@ export function DetailsForm() {
       </div>
       <div className="space-y-1.5">
         <Label htmlFor="profile-phone">Phone</Label>
-        <Input
-          id="profile-phone"
-          type="tel"
-          inputMode="tel"
-          autoComplete="tel"
-          placeholder="+91 9XXXXXXXXX"
-          value={phone}
-          onChange={(e) => setPhone(e.target.value)}
-        />
+        <PhoneInput id="profile-phone" value={phone} onChange={(v) => setPhone(v)} />
       </div>
       <Button type="submit" disabled={save.isPending || !name.trim()}>
         {save.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden /> : null}

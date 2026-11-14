@@ -1,4 +1,4 @@
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { env } from "../env";
 import { HttpError } from "../httpError";
 
@@ -85,5 +85,38 @@ export const r2 = {
     } catch {
       return null;
     }
+  },
+
+  /**
+   * Totals the configured bucket by top-level folder. Each page of 1,000 objects is one list request,
+   * so a very large bucket is cut off after maxPages and flagged as truncated.
+   */
+  async usage(maxPages = 50) {
+    const folders = new Map<string, { bytes: number; objects: number }>();
+    let bytes = 0;
+    let objects = 0;
+    let token: string | undefined;
+    let pages = 0;
+    let truncated = false;
+    do {
+      const res = await client().send(new ListObjectsV2Command({ Bucket: env.R2_BUCKET, ContinuationToken: token, MaxKeys: 1000 }));
+      pages++;
+      for (const item of res.Contents ?? []) {
+        const size = item.Size ?? 0;
+        const folder = item.Key?.includes("/") ? item.Key.split("/")[0] : "(root)";
+        const entry = folders.get(folder) ?? { bytes: 0, objects: 0 };
+        entry.bytes += size;
+        entry.objects++;
+        folders.set(folder, entry);
+        bytes += size;
+        objects++;
+      }
+      token = res.IsTruncated ? res.NextContinuationToken : undefined;
+      if (token && pages >= maxPages) {
+        truncated = true;
+        break;
+      }
+    } while (token);
+    return { bucket: env.R2_BUCKET as string, bytes, objects, truncated, folders: [...folders].map(([name, v]) => ({ name, ...v })).sort((a, b) => b.bytes - a.bytes) };
   },
 };

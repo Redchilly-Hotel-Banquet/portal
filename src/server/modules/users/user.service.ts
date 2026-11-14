@@ -1,3 +1,4 @@
+import { outletDirectory, outletKeyOf } from "../../utils/outlets";
 import { ObjectId } from "mongodb";
 import { seal, unseal } from "../../crypto";
 import { env } from "../../env";
@@ -6,7 +7,7 @@ import { mongoConnection } from "../../mongo";
 import { SUPER_OWNER_EMAIL } from "../../../lib/super-owner";
 import { signSession, type AuthenticatedUser } from "../../session";
 import { stringifyId, toObjectId } from "../../utils/objectId";
-import { tenDigitPhone } from "../../../lib/phone";
+import { normalisePhone } from "../../../lib/phone";
 import { currentRoomIds, isCheckinLocked } from "../../utils/roomAssignments";
 import { parseImageDataUrl, r2 } from "../../storage/r2";
 
@@ -74,8 +75,7 @@ const dataUrl = (value: unknown, label: string, max: number): string => {
   return value;
 };
 
-/** Matches a stored phone number written any way ("98765 43210", "+91-98765-43210", "09876543210"). */
-export const phonePattern = (tenDigits: string) => `^\\D*(?:91\\D*|0\\D*)?${tenDigits.split("").join("\\D*")}\\D*$`;
+/** Phone numbers are stored with their country dial code ("+919876543210"), so a number is matched exactly. */
 
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -127,13 +127,16 @@ const sanitiseRoles = (raw: unknown): string[] => {
 const sanitiseOutlets = (raw: unknown): string[] => {
   const values = Array.isArray(raw) ? raw : typeof raw === "string" ? [raw] : [];
   const outlets = values
-    .map((value) => (typeof value === "string" ? value.trim() : ""))
-    .filter(Boolean);
+    .map((value) => (typeof value === "string" ? value.trim() : (stringifyId(value) ?? "")))
+    .filter(Boolean)
+    // A stored branch id is shown and carried as the branch's key.
+    .map((value) => outletKeyOf(value) ?? value);
   return outlets.length > 0 ? Array.from(new Set(outlets)) : ["all"];
 };
 
 const collection = async () => {
   const users = mongoConnection.getDb().collection<UserDocument>(USERS_COLLECTION);
+  await outletDirectory.load();
   await ensureIndexes();
   return users;
 };
@@ -409,7 +412,7 @@ export const userService = {
 
     const outletNames = new Map<string, string>();
     for (const outlet of await db.collection("outlets").find({}).project({ location_key: 1, name: 1 }).toArray()) {
-      if (outlet.location_key) outletNames.set(String(outlet.location_key), String(outlet.name ?? outlet.location_key));
+      if (outlet.location_key) outletNames.set(String(outlet._id), String(outlet.name ?? outlet.location_key));
     }
 
     const today = startOfTodayUtc().getTime();
@@ -425,7 +428,7 @@ export const userService = {
         id: stringifyId(doc._id) ?? "",
         bookingCode: String(doc.booking_code ?? ""),
         status,
-        outlet: outletNames.get(String(doc.outlet_id)) ?? String(doc.outlet_id ?? ""),
+        outlet: outletNames.get(String(doc.outlet_id)) ?? outletKeyOf(doc.outlet_id) ?? "",
         checkInDate: checkIn && !Number.isNaN(checkIn.getTime()) ? checkIn.toISOString() : null,
         checkOutDate: checkOut && !Number.isNaN(checkOut.getTime()) ? checkOut.toISOString() : null,
         nights: Number(doc.nights ?? 0),
@@ -470,7 +473,7 @@ export const userService = {
 
     const outletNames = new Map<string, string>();
     for (const outlet of await db.collection("outlets").find({}).project({ location_key: 1, name: 1 }).toArray()) {
-      if (outlet.location_key) outletNames.set(String(outlet.location_key), String(outlet.name ?? outlet.location_key));
+      if (outlet.location_key) outletNames.set(String(outlet._id), String(outlet.name ?? outlet.location_key));
     }
 
     const rooms: StayRoom[] = [];
@@ -489,12 +492,13 @@ export const userService = {
         const type = String(room.type ?? "").toUpperCase();
         if (!id || seen.has(id) || (type !== "ROOM" && type !== "HOTEL_ROOM")) continue;
         seen.add(id);
-        const outletId = String(room.outlet_id ?? booking.outlet_id ?? "");
+        const outletRef = String(room.outlet_id ?? booking.outlet_id ?? "");
+        const outletId = outletKeyOf(outletRef) ?? outletRef;
         rooms.push({
           id,
           code: String(room.code ?? ""),
           outletId,
-          outletName: outletNames.get(outletId) ?? outletId,
+          outletName: outletNames.get(outletRef) ?? outletId,
           bookingId: stringifyId(booking._id) ?? "",
           bookingCode: String(booking.booking_code ?? ""),
           checkOutDate: booking.check_out_date ? new Date(booking.check_out_date).toISOString() : null,
@@ -516,8 +520,9 @@ export const userService = {
       changes.name = name;
     }
     if (input.phone !== undefined) {
-      const phone = String(input.phone).replace(/[\s()-]/g, "");
-      if (phone && !/^\+?[0-9]{7,15}$/.test(phone)) throw new HttpError(400, "Enter a valid phone number");
+      const typed = String(input.phone).trim();
+      const phone = typed ? normalisePhone(typed) : "";
+      if (typed && !phone) throw new HttpError(400, "Enter a valid phone number");
       changes.phone = phone;
     }
     if (Object.keys(changes).length === 0) throw new HttpError(400, "Nothing to update");
@@ -542,8 +547,8 @@ export const userService = {
    */
   async linkBookingsByPhone(userId: string, rawPhone: string): Promise<number> {
     const bookings = mongoConnection.getDb().collection("bookings");
-    const ten = tenDigitPhone(rawPhone);
-    const matchesPhone = ten ? { guest_phone: { $regex: phonePattern(ten) } } : null;
+    const e164 = normalisePhone(rawPhone);
+    const matchesPhone = e164 ? { guest_phone: e164 } : null;
     await bookings.updateMany(
       { linked_user_ids: userId, ...(matchesPhone ? { $nor: [matchesPhone] } : {}) },
       { $pull: { linked_user_ids: userId } } as any,

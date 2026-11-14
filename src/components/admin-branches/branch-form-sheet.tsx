@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PhoneInput } from "@/components/ui/phone-input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
@@ -147,7 +148,7 @@ export function BranchFormSheet({ open, onOpenChange, branch, existingKeys, savi
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label htmlFor="branch-phone">Phone</Label>
-                <Input id="branch-phone" type="tel" value={form.contact_number} onChange={(e) => set("contact_number", e.target.value)} placeholder="+91 98765 43210" disabled={saving} />
+                <PhoneInput id="branch-phone" disabled={saving} value={form.contact_number} onChange={(v) => set("contact_number", v)} />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="branch-email">Email</Label>

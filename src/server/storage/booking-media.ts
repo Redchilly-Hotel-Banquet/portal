@@ -73,6 +73,7 @@ export const hydrateCheckinDetails = async <T>(details: T): Promise<T> => {
         source.guests.map(async (guest: any) => ({
           ...guest,
           document_image: await hydrateFile(guest?.document_image),
+          document_images: Array.isArray(guest?.document_images) ? await Promise.all(guest.document_images.map((file: any) => hydrateFile(file))) : guest?.document_images,
           signature_image: await hydrateFile(guest?.signature_image),
         })),
       )

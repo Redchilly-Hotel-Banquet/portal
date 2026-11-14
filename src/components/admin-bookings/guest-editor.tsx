@@ -7,9 +7,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { PhoneInput } from "@/components/ui/phone-input";
 import { Label } from "@/components/ui/label";
-import { compressImage } from "@/components/stay/compress-image";
-import { DOCUMENT_TYPES } from "@/components/stay/checkin/types";
+import { DocumentPhotos } from "@/components/stay/checkin/document-photos";
+import { useDocumentTypes } from "@/hooks/useDocumentTypes";
+import { photoSpecsFor } from "@/lib/document-types";
+import { sideImage, withSideImage } from "@/lib/document-photos";
 import { guestStatus, isGuestComplete, MAX_ADMIN_GUESTS, type AdminGuest, type Completeness } from "./checkin-guests";
 import { SignaturePad } from "./signature-pad";
 import { optionalPhoneError } from "@/lib/phone";
@@ -35,28 +38,14 @@ type CardProps = {
 };
 
 function GuestCard({ guest, index, removable, onChange, onRemove, onPreview, rules }: CardProps) {
-  const fileRef = useRef<HTMLInputElement | null>(null);
-  const [busy, setBusy] = useState(false);
   const [drawing, setDrawing] = useState(false);
   const status = guestStatus(guest, rules);
   const id = `guest-${guest.key}`;
-  const placeholder = DOCUMENT_TYPES.find((type) => type.value === guest.documentType)?.placeholder ?? "Document number";
+  const types = useDocumentTypes();
+  const sides = photoSpecsFor(types, guest.documentType);
+  const placeholder = types.find((type) => type.value === guest.documentType)?.placeholder ?? "Document number";
   const label = guest.fullName.trim() || `Guest ${index + 1}`;
   const showPad = drawing || !guest.signature;
-
-  const pickFile = async (file: File | undefined) => {
-    if (!file) return;
-    setBusy(true);
-    try {
-      const image = await compressImage(file);
-      onChange({ imageDataUrl: image.dataUrl, imageName: image.name, imageType: image.type });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Unable to read that image");
-    } finally {
-      setBusy(false);
-      if (fileRef.current) fileRef.current.value = "";
-    }
-  };
 
   return (
     <li className="space-y-4 rounded-md border bg-card p-4">
@@ -81,16 +70,7 @@ function GuestCard({ guest, index, removable, onChange, onRemove, onPreview, rul
           <Label htmlFor={`${id}-phone`}>
             Mobile number <span className="text-xs font-normal text-muted-foreground">Optional</span>
           </Label>
-          <Input
-            id={`${id}-phone`}
-            type="tel"
-            inputMode="tel"
-            value={guest.phone}
-            placeholder="10-digit mobile number"
-            onChange={(e) => onChange({ phone: e.target.value })}
-            aria-invalid={Boolean(optionalPhoneError(guest.phone))}
-            autoComplete="off"
-          />
+          <PhoneInput id={`${id}-phone`} invalid={Boolean(optionalPhoneError(guest.phone))} value={guest.phone} onChange={(v) => onChange({ phone: v })} />
           {optionalPhoneError(guest.phone) ? <p className="text-xs text-destructive">{optionalPhoneError(guest.phone)}</p> : null}
         </div>
         <div className="space-y-1.5">
@@ -101,7 +81,7 @@ function GuestCard({ guest, index, removable, onChange, onRemove, onPreview, rul
             onChange={(e) => onChange({ documentType: e.target.value })}
             className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:text-sm"
           >
-            {DOCUMENT_TYPES.map((type) => (
+            {(types.some((type) => type.value === guest.documentType) ? types : [...types, { value: guest.documentType, label: guest.documentType, placeholder: "", photos: ["Photo"], optional: [false] }]).map((type) => (
               <option key={type.value} value={type.value}>
                 {type.label}
               </option>
@@ -120,38 +100,15 @@ function GuestCard({ guest, index, removable, onChange, onRemove, onPreview, rul
         </div>
       </div>
 
-      <div className="space-y-2">
-        <p className="text-sm font-medium">ID photo{rules.document_photo ? "" : " (optional)"}</p>
-        <div className="flex flex-wrap items-center gap-3">
-          {guest.imageDataUrl ? (
-            <button
-              type="button"
-              onClick={() => onPreview({ src: guest.imageDataUrl, name: label })}
-              className="rounded-sm border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              aria-label={`Enlarge ${label} ID photo`}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={guest.imageDataUrl} alt="" className="h-16 w-24 rounded-sm object-cover" />
-            </button>
-          ) : (
-            <div className="flex h-16 w-24 items-center justify-center rounded-sm border border-dashed text-xs text-muted-foreground">
-              No photo
-            </div>
-          )}
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            className="sr-only"
-            aria-label={`${label} ID photo file`}
-            onChange={(e) => void pickFile(e.target.files?.[0])}
-          />
-          <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => fileRef.current?.click()}>
-            <ImagePlus className="mr-2 h-4 w-4" strokeWidth={1.75} aria-hidden />
-            {busy ? "Processing" : guest.imageDataUrl ? "Replace photo" : "Upload photo"}
-          </Button>
-        </div>
-      </div>
+      <DocumentPhotos
+        id={id}
+        who={label}
+        sides={sides}
+        images={sides.map((_, index) => sideImage(guest, index))}
+        optional={!rules.document_photo}
+        onChange={(index, image) => onChange(withSideImage(guest, index, image))}
+        onPreview={onPreview}
+      />
 
       <div className="space-y-2">
         <p className="text-sm font-medium">Signature{rules.signature ? "" : " (optional)"}</p>
