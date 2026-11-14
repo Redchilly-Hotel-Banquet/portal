@@ -21,6 +21,7 @@ import {
 } from "@/lib/checkin-rules";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DocumentTypesPanel } from "./document-types-panel";
+import { OrderAlertsPanel } from "./order-alerts-panel";
 import { InvoicePanel } from "./invoice-panel";
 import { TemplateVariablesPanel } from "./template-variables-panel";
 
@@ -91,10 +92,12 @@ export function ConfigPanel() {
         <TabsTrigger value="invoice">Invoice</TabsTrigger>
         <TabsTrigger value="bill">Bill</TabsTrigger>
         <TabsTrigger value="messages">Message variables</TabsTrigger>
+        <TabsTrigger value="alerts">Order alerts</TabsTrigger>
       </TabsList>
       <TabsContent value="documents" className="mt-0"><DocumentTypesPanel /></TabsContent>
       <TabsContent value="invoice" className="mt-0"><InvoicePanel kind="invoice" /></TabsContent>
       <TabsContent value="bill" className="mt-0"><InvoicePanel kind="bill" /></TabsContent>
+      <TabsContent value="alerts" className="mt-0"><OrderAlertsPanel /></TabsContent>
       <TabsContent value="messages" className="mt-0"><TemplateVariablesPanel /></TabsContent>
       <TabsContent value="checkin" className="mt-0">
       <form

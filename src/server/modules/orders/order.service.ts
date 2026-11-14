@@ -16,6 +16,7 @@ import {
   GetGuestOrdersResponse,
   GetOrderRequest,
 } from "./order.types";
+import { notifyNewOrder } from "./order-alert.service";
 
 const serializeId = (input: unknown): string | null => {
   try {
@@ -175,6 +176,15 @@ export class OrderService {
     if (orderItems.length > 0) {
       await orderItemsCollection.insertMany(orderItems);
     }
+
+    // Orders placed by staff in the admin portal skip this; only guest orders alert the kitchen numbers.
+    await notifyNewOrder({
+      outletId: outletRef,
+      locationId: location._id,
+      specialInstructions: specialInstructions || null,
+      total: subtotal,
+      items: items.map((item) => ({ id: String(item.id), quantity: Number(item.quantity ?? 0), notes: item.notes ?? null })),
+    });
 
     return { orderId, bookingId: resolvedBookingId };
   }

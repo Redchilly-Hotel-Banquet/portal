@@ -57,3 +57,22 @@ export function renderTemplate(template: string, values: Record<string, string>)
   }
   return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
+
+/** The message the kitchen numbers get for a new guest order. Editable under Settings -> Configuration -> Order alerts. */
+export const DEFAULT_ORDER_ALERT_TEMPLATE = `New order for the kitchen
+Branch: {branch}
+Room/Table: {location}
+
+{items}
+
+{note}
+
+Total: Rs {total}`;
+
+export const ORDER_ALERT_PLACEHOLDERS: Array<{ key: string; description: string }> = [
+  { key: "branch", description: "The branch name" },
+  { key: "location", description: "The room or table the order is for" },
+  { key: "items", description: "The items, one per line, with quantity and notes" },
+  { key: "note", description: "The guest's special instructions" },
+  { key: "total", description: "The order total in rupees" },
+];

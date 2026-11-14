@@ -15,6 +15,10 @@ const schema = z.object({
   R2_ACCESS_KEY_ID: z.string().optional(),
   R2_SECRET_ACCESS_KEY: z.string().optional(),
   R2_BUCKET: z.string().optional(),
+  /** API key of the WhatsApp sending service used for kitchen order alerts. */
+  WA_SERVICE_TOKEN: z.string().optional(),
+  /** Base URL of the WhatsApp sending service; messages are POSTed to <host>/whatsapp/send. */
+  WA_SERVICE_HOST: z.string().optional(),
   /** Public base URL of the bucket's custom domain; only Menu/ images are ever linked through it. */
   MEDIA_BASE_URL: z.string().optional(),
 });
