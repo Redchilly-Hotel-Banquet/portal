@@ -12,6 +12,7 @@ import { apiPost } from "@/lib/apiClient";
 import { optionalPhoneError } from "@/lib/phone";
 import { DEFAULT_ORDER_ALERT_TEMPLATE, ORDER_ALERT_PLACEHOLDERS, renderTemplate } from "@/lib/whatsapp-template";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 
 const KEY = ["order-alert-numbers"];
 
@@ -21,25 +22,28 @@ export function OrderAlertsPanel() {
   const canEdit = getAdminOutlets().includes("all");
   const [numbers, setNumbers] = useState<string[]>([]);
   const [template, setTemplate] = useState("");
+  const [enabled, setEnabled] = useState(true);
 
   const query = useQuery({
     queryKey: KEY,
-    queryFn: () => apiPost<{ order_alert_numbers?: string[]; order_alert_template?: string }>("/admin/config", { action: "get" }, true),
-    select: (data) => ({ numbers: data?.order_alert_numbers ?? [], template: data?.order_alert_template ?? "" }),
+    queryFn: () => apiPost<{ order_alert_numbers?: string[]; order_alert_template?: string; whatsapp_enabled?: boolean }>("/admin/config", { action: "get" }, true),
+    select: (data) => ({ numbers: data?.order_alert_numbers ?? [], template: data?.order_alert_template ?? "", enabled: data?.whatsapp_enabled !== false }),
     refetchOnWindowFocus: false,
   });
   useEffect(() => {
     if (query.data) {
       setNumbers(query.data.numbers);
       setTemplate(query.data.template);
+      setEnabled(query.data.enabled);
     }
   }, [query.data]);
 
   const save = useMutation({
-    mutationFn: () => apiPost("/admin/config", { action: "update_order_alerts", order_alert_numbers: numbers.filter((n) => n.trim()), order_alert_template: template.trim() === DEFAULT_ORDER_ALERT_TEMPLATE ? "" : template }, true),
+    mutationFn: () => apiPost("/admin/config", { action: "update_order_alerts", order_alert_numbers: numbers.filter((n) => n.trim()), order_alert_template: template.trim() === DEFAULT_ORDER_ALERT_TEMPLATE ? "" : template, whatsapp_enabled: enabled }, true),
     onSuccess: () => {
       toast.success("Order alerts saved");
       void queryClient.invalidateQueries({ queryKey: KEY });
+      void queryClient.invalidateQueries({ queryKey: ["whatsapp-enabled"] });
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : "Could not save the numbers"),
   });
@@ -49,6 +53,7 @@ export function OrderAlertsPanel() {
 
   const problem = numbers.map((n) => optionalPhoneError(n)).find(Boolean) ?? "";
   const dirty =
+    enabled !== (query.data?.enabled ?? true) ||
     JSON.stringify(numbers.filter((n) => n.trim())) !== JSON.stringify(query.data?.numbers ?? []) ||
     (template.trim() === DEFAULT_ORDER_ALERT_TEMPLATE ? "" : template.trim()) !== (query.data?.template ?? "").trim();
   const preview = renderTemplate(template.trim() || DEFAULT_ORDER_ALERT_TEMPLATE, {
@@ -74,6 +79,17 @@ export function OrderAlertsPanel() {
           These WhatsApp numbers get a message whenever an order reaches the kitchen from somewhere other than the admin portal, such as a guest ordering from their room or table. Orders entered by staff in the admin portal do not send one.
         </p>
       </div>
+      <section className="flex items-center justify-between gap-4 rounded-md border border-border bg-card p-5">
+        <div>
+          <h3 className="text-base font-medium">WhatsApp messages</h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {enabled
+              ? "On. Kitchen alerts are sent, and the WhatsApp buttons for guest stay details are shown."
+              : "Off. No kitchen alerts are sent and the guest WhatsApp buttons are disabled, on the website and in the app."}
+          </p>
+        </div>
+        <Switch checked={enabled} disabled={!canEdit} onCheckedChange={setEnabled} aria-label="Send WhatsApp messages" />
+      </section>
       <section className="space-y-3 rounded-md border border-border bg-card p-5">
         {numbers.length === 0 ? <p className="text-sm text-muted-foreground">No numbers yet, so no alerts are sent.</p> : null}
         {numbers.map((number, index) => (
@@ -125,7 +141,7 @@ export function OrderAlertsPanel() {
       </section>
       {canEdit ? (
         <div className="sticky bottom-0 -mx-1 flex justify-end gap-2 border-t bg-background px-1 py-3">
-          <Button type="button" variant="ghost" disabled={!dirty || save.isPending} onClick={() => { setNumbers(query.data?.numbers ?? []); setTemplate(query.data?.template ?? ""); }}>Discard changes</Button>
+          <Button type="button" variant="ghost" disabled={!dirty || save.isPending} onClick={() => { setNumbers(query.data?.numbers ?? []); setTemplate(query.data?.template ?? ""); setEnabled(query.data?.enabled ?? true); }}>Discard changes</Button>
           <Button type="submit" disabled={!dirty || save.isPending || Boolean(problem)}>
             {save.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden /> : null}
             Save

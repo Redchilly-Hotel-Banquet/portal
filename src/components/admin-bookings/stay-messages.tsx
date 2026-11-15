@@ -1,6 +1,8 @@
 "use client";
 
 import { MessageCircle } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { apiPost } from "@/lib/apiClient";
 import { Button } from "@/components/ui/button";
 import { formatPhone, normalisePhone, whatsappLink } from "@/lib/phone";
 import { DEFAULT_WHATSAPP_TEMPLATE, renderTemplate } from "@/lib/whatsapp-template";
@@ -102,6 +104,14 @@ export function StayMessages({
   welcome: WelcomeInfo | undefined;
   roomLevels?: Record<string, string>;
 }) {
+  // The administrator can switch WhatsApp off under Settings.
+  const whatsapp = useQuery({
+    queryKey: ["whatsapp-enabled"],
+    queryFn: () => apiPost<{ whatsapp_enabled?: boolean }>("/admin/config", { action: "get" }, true),
+    select: (data) => data?.whatsapp_enabled !== false,
+    staleTime: 60_000,
+  });
+  const whatsappOn = whatsapp.data !== false;
   const recipients = recipientsOf(booking);
   const missingWifi = wifiFor(booking, welcome, roomLevels).length === 0;
 
@@ -125,7 +135,12 @@ export function StayMessages({
                   <span className="block truncate font-medium">{recipient.name}</span>
                   <span className="text-xs text-muted-foreground tabular-nums">{formatPhone(recipient.phone)}</span>
                 </span>
-                {href ? (
+                {href && !whatsappOn ? (
+                  <Button size="sm" variant="outline" disabled title="WhatsApp is switched off in Settings">
+                    <MessageCircle className="mr-2 h-4 w-4" strokeWidth={1.75} aria-hidden />
+                    WhatsApp off
+                  </Button>
+                ) : href ? (
                   <Button asChild size="sm" variant="outline">
                     <a href={href} target="_blank" rel="noopener noreferrer" aria-label={`Send stay details to ${recipient.name} on WhatsApp`}>
                       <MessageCircle className="mr-2 h-4 w-4" strokeWidth={1.75} aria-hidden />

@@ -37,11 +37,15 @@ public class MainActivity extends Activity {
     private static final int FILE_REQUEST = 1;
     private static final int CAMERA_REQUEST = 2;
     private static final int NOTIFY_REQUEST = 3;
+    private static final int CAMERA_FOR_UPLOAD = 4;
 
     private WebView web;
     private ProgressBar progress;
     private ValueCallback<Uri[]> filePicker;
     private PermissionRequest pendingCamera;
+    // A photo taken for an upload field: where the camera writes it, and the pick waiting for the camera permission.
+    private Uri cameraPhoto;
+    private Intent pendingChooser;
     private final Handler main = new Handler(Looper.getMainLooper());
 
     @Override
@@ -62,7 +66,7 @@ public class MainActivity extends Activity {
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setSupportZoom(false);
         // Lets the website know it is inside the app (it then leaves the order alarm sound to the phone's notification).
-        s.setUserAgentString(s.getUserAgentString() + " RedChillyApp/1.4");
+        s.setUserAgentString(s.getUserAgentString() + " RedChillyApp/1.5");
 
         web.addJavascriptInterface(new Bridge(), "RedChillyApp");
         web.setWebViewClient(new WebViewClient() {
@@ -114,7 +118,20 @@ public class MainActivity extends Activity {
                 if (filePicker != null) filePicker.onReceiveValue(null);
                 filePicker = callback;
                 try {
-                    startActivityForResult(params.createIntent(), FILE_REQUEST);
+                    Intent pick = params.createIntent();
+                    boolean images = acceptsImages(params.getAcceptTypes());
+                    Intent chooser = Intent.createChooser(pick, "Choose a file");
+                    // For photos (ID documents, pictures) also offer the camera next to the file picker.
+                    if (images) {
+                        if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                            launchChooser(chooser, true);
+                        } else {
+                            pendingChooser = chooser;
+                            requestPermissions(new String[] {Manifest.permission.CAMERA}, CAMERA_FOR_UPLOAD);
+                        }
+                    } else {
+                        startActivityForResult(chooser, FILE_REQUEST);
+                    }
                 } catch (ActivityNotFoundException e) {
                     filePicker = null;
                     return false;
@@ -172,11 +189,48 @@ public class MainActivity extends Activity {
         web.saveState(out);
     }
 
+    /** True when the field takes pictures: no restriction at all, or image/* or a picture type is listed. */
+    private static boolean acceptsImages(String[] types) {
+        if (types == null || types.length == 0) return true;
+        for (String type : types) {
+            if (type == null || type.isEmpty() || type.startsWith("image") || type.equals("*/*") || type.equals(".jpg") || type.equals(".jpeg") || type.equals(".png")) return true;
+        }
+        return false;
+    }
+
+    /** Shows the file picker with a "take a photo" choice added. */
+    private void launchChooser(Intent chooser, boolean withCamera) {
+        try {
+            if (withCamera) {
+                java.io.File folder = new java.io.File(getCacheDir(), "camera");
+                //noinspection ResultOfMethodCallIgnored
+                folder.mkdirs();
+                java.io.File photo = java.io.File.createTempFile("photo-", ".jpg", folder);
+                cameraPhoto = androidx.core.content.FileProvider.getUriForFile(this, "in.redchilly.app.files", photo);
+                Intent camera = new Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE)
+                        .putExtra(android.provider.MediaStore.EXTRA_OUTPUT, cameraPhoto)
+                        .addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS, new Intent[] {camera});
+            }
+            startActivityForResult(chooser, FILE_REQUEST);
+        } catch (java.io.IOException | ActivityNotFoundException e) {
+            if (filePicker != null) filePicker.onReceiveValue(null);
+            filePicker = null;
+        }
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         if (requestCode == FILE_REQUEST && filePicker != null) {
-            filePicker.onReceiveValue(resultCode == RESULT_OK ? android.webkit.WebChromeClient.FileChooserParams.parseResult(resultCode, data) : null);
+            Uri[] result = null;
+            if (resultCode == RESULT_OK) {
+                // A photo from the camera comes back with no data; it is in the file we gave the camera.
+                if ((data == null || (data.getData() == null && data.getClipData() == null)) && cameraPhoto != null) result = new Uri[] {cameraPhoto};
+                else result = android.webkit.WebChromeClient.FileChooserParams.parseResult(resultCode, data);
+            }
+            filePicker.onReceiveValue(result);
             filePicker = null;
+            cameraPhoto = null;
             return;
         }
         super.onActivityResult(requestCode, resultCode, data);
@@ -184,6 +238,13 @@ public class MainActivity extends Activity {
 
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+        if (requestCode == CAMERA_FOR_UPLOAD && pendingChooser != null) {
+            // With or without the camera permission the file picker still opens; the camera choice needs it.
+            Intent chooser = pendingChooser;
+            pendingChooser = null;
+            launchChooser(chooser, results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED);
+            return;
+        }
         if (requestCode == CAMERA_REQUEST && pendingCamera != null) {
             if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) pendingCamera.grant(pendingCamera.getResources());
             else pendingCamera.deny();

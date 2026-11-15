@@ -12,8 +12,8 @@ android {
         applicationId 'in.redchilly.app'
         minSdk 24
         targetSdk 34
-        versionCode 5
-        versionName "1.4"
+        versionCode 6
+        versionName "1.5"
     }
 
     sourceSets {
@@ -48,4 +48,5 @@ android {
 
 dependencies {
     implementation 'com.google.firebase:firebase-messaging:24.1.0'
+    implementation 'androidx.core:core:1.13.1'
 }

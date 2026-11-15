@@ -26,6 +26,8 @@ type ConfigRequest = {
   order_alert_numbers?: unknown;
   /** update_order_alerts: the message wording; blank means the standard wording. */
   order_alert_template?: unknown;
+  /** update_order_alerts: false stops every WhatsApp message the system sends or offers. */
+  whatsapp_enabled?: unknown;
   document_types?: unknown;
   invoice_setting_sets?: unknown;
   /** update_invoice_settings: which document the settings are for. */
@@ -72,11 +74,13 @@ export const configService = {
   },
 
   /** WhatsApp numbers (as "+<code><number>") and message wording for orders that do not come from the admin portal. */
-  async getOrderAlerts(): Promise<{ numbers: string[]; template: string }> {
+  async getOrderAlerts(): Promise<{ numbers: string[]; template: string; enabled: boolean }> {
     const doc = await mongoConnection.getDb().collection(COLLECTION).findOne({ _id: ORDER_ALERTS_KEY as any });
     return {
       numbers: Array.isArray(doc?.numbers) ? doc.numbers.filter((n: unknown): n is string => typeof n === "string") : [],
       template: typeof doc?.template === "string" ? doc.template : "",
+      // The master switch for WhatsApp messages; on unless an administrator turned it off.
+      enabled: doc?.enabled !== false,
     };
   },
 
@@ -131,8 +135,8 @@ export const configService = {
       await mongoConnection
         .getDb()
         .collection(COLLECTION)
-        .updateOne({ _id: ORDER_ALERTS_KEY as any }, { $set: { numbers, template, updated_at: new Date(), updated_by: toObjectId(user.id) ?? user.id } }, { upsert: true });
-      return { order_alert_numbers: numbers, order_alert_template: template };
+        .updateOne({ _id: ORDER_ALERTS_KEY as any }, { $set: { numbers, template, enabled: request.whatsapp_enabled !== false, updated_at: new Date(), updated_by: toObjectId(user.id) ?? user.id } }, { upsert: true });
+      return { order_alert_numbers: numbers, order_alert_template: template, whatsapp_enabled: request.whatsapp_enabled !== false };
     }
     if (request?.action === "update_document_types") {
       if (!user.roles.includes("admin")) throw new HttpError(403, "Only an administrator can change these settings.");
@@ -160,6 +164,6 @@ export const configService = {
         .updateOne({ _id: VARIABLES_KEY as any }, { $set: { variables: variables.map((variable) => ({ ...variable, outlets: asIds(variable.outlets) })), updated_at: new Date(), updated_by: toObjectId(user.id) ?? user.id } }, { upsert: true });
       return { template_variables: variables };
     }
-    return { checkin_rule_sets: await this.getCheckinRuleSets(), template_variables: await this.getTemplateVariables(), document_types: await this.getDocumentTypes(), invoice_setting_sets: await this.getInvoiceSettingSets("invoice"), bill_setting_sets: await this.getInvoiceSettingSets("bill"), ...(await this.getOrderAlerts().then((a) => ({ order_alert_numbers: a.numbers, order_alert_template: a.template }))) };
+    return { checkin_rule_sets: await this.getCheckinRuleSets(), template_variables: await this.getTemplateVariables(), document_types: await this.getDocumentTypes(), invoice_setting_sets: await this.getInvoiceSettingSets("invoice"), bill_setting_sets: await this.getInvoiceSettingSets("bill"), ...(await this.getOrderAlerts().then((a) => ({ order_alert_numbers: a.numbers, order_alert_template: a.template, whatsapp_enabled: a.enabled }))) };
   },
 };

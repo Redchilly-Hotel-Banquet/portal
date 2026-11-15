@@ -22,8 +22,9 @@ type AlertOrder = {
  */
 export async function notifyNewOrder(order: AlertOrder): Promise<void> {
   try {
-    const { numbers, template } = await configService.getOrderAlerts();
-    if (numbers.length === 0) return;
+    const { numbers, template, enabled } = await configService.getOrderAlerts();
+    // An administrator can switch every WhatsApp message off under Settings.
+    if (!enabled || numbers.length === 0) return;
 
     const db = mongoConnection.getDb();
     const ids = order.items.flatMap((item) => [item.id, toObjectId(item.id)].filter(Boolean));
