@@ -19,6 +19,8 @@ const schema = z.object({
   WA_SERVICE_TOKEN: z.string().optional(),
   /** Base URL of the WhatsApp sending service; messages are POSTed to <host>/whatsapp/send. */
   WA_SERVICE_HOST: z.string().optional(),
+  /** Firebase service-account key (JSON, or base64 of it) used to push new-order notifications to the staff app. */
+  FIREBASE_SERVICE_ACCOUNT: z.string().optional(),
   /** Public base URL of the bucket's custom domain; only Menu/ images are ever linked through it. */
   MEDIA_BASE_URL: z.string().optional(),
 });

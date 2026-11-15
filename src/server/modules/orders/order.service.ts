@@ -16,7 +16,7 @@ import {
   GetGuestOrdersResponse,
   GetOrderRequest,
 } from "./order.types";
-import { notifyNewOrder } from "./order-alert.service";
+import { notifyNewOrder, pushNewOrder } from "./order-alert.service";
 
 const serializeId = (input: unknown): string | null => {
   try {
@@ -182,6 +182,13 @@ export class OrderService {
       outletId: outletRef,
       locationId: location._id,
       specialInstructions: specialInstructions || null,
+      total: subtotal,
+      items: items.map((item) => ({ id: String(item.id), quantity: Number(item.quantity ?? 0), notes: item.notes ?? null })),
+    });
+    await pushNewOrder({
+      orderId,
+      outletId: outletRef,
+      locationId: location._id,
       total: subtotal,
       items: items.map((item) => ({ id: String(item.id), quantity: Number(item.quantity ?? 0), notes: item.notes ?? null })),
     });

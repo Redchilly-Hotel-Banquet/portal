@@ -1,0 +1,51 @@
+plugins {
+    id 'com.android.application' version '8.7.3'
+    id 'com.google.gms.google-services' version '4.4.2'
+}
+
+// Keep the original layout: sources in src/, resources in res/, manifest at the top.
+android {
+    namespace 'in.redchilly.app'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'in.redchilly.app'
+        minSdk 24
+        targetSdk 34
+        versionCode 3
+        versionName '1.2'
+    }
+
+    sourceSets {
+        main {
+            manifest.srcFile 'AndroidManifest.xml'
+            java.srcDirs = ['src']
+            res.srcDirs = ['res']
+        }
+    }
+
+    // The signing key lives outside the repo (see build.sh); an update must be signed with the same key.
+    def keyDir = new File(System.getProperty('user.home'), '.redchilly-keystore')
+    signingConfigs {
+        release {
+            storeFile new File(keyDir, 'redchilly.jks')
+            storePassword new File(keyDir, 'pass.txt').exists() ? new File(keyDir, 'pass.txt').text.trim() : ''
+            keyAlias 'redchilly'
+            keyPassword new File(keyDir, 'pass.txt').exists() ? new File(keyDir, 'pass.txt').text.trim() : ''
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
+
+dependencies {
+    implementation 'com.google.firebase:firebase-messaging:24.1.0'
+}

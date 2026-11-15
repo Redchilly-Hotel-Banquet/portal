@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "886631386443",
+    "project_id": "redchilly-gorakhpur",
+    "storage_bucket": "redchilly-gorakhpur.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:886631386443:android:192d138c76d168ec6e6cce",
+        "android_client_info": {
+          "package_name": "in.redchilly.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyClFVWV19fQ7uuxX7wTgGrmynFyZ-DoYow"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

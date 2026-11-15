@@ -5,8 +5,10 @@ import { toObjectId } from "../../utils/objectId";
 import { sendWhatsapp } from "../../whatsapp";
 import { DEFAULT_ORDER_ALERT_TEMPLATE, renderTemplate } from "../../../lib/whatsapp-template";
 import { configService } from "../config/config.service";
+import { pushToKitchen } from "../../push/fcm";
 
 type AlertOrder = {
+  orderId?: unknown;
   outletId: ObjectId;
   locationId: unknown;
   specialInstructions?: string | null;
@@ -46,5 +48,25 @@ export async function notifyNewOrder(order: AlertOrder): Promise<void> {
     await sendWhatsapp(numbers, message);
   } catch (error) {
     console.error("[order-alert] could not send the kitchen alert", error);
+  }
+}
+
+/** Pushes a guest order to the kitchen and admin phones running the staff app. Failures are logged and swallowed. */
+export async function pushNewOrder(order: AlertOrder): Promise<void> {
+  try {
+    const db = mongoConnection.getDb();
+    const location = order.locationId
+      ? await db.collection("rooms_tables").findOne({ _id: order.locationId as any }, { projection: { code: 1, name: 1, type: 1 } })
+      : null;
+    const where = String(location?.code ?? location?.name ?? "").trim();
+    const kind = String(location?.type ?? "").replace(/_/g, " ").toLowerCase();
+    await pushToKitchen(outletKeyOf(order.outletId) ?? null, {
+      kind: "order",
+      id: String(order.orderId ?? ""),
+      where: `${kind} ${where}`.trim(),
+      items: String(order.items.length),
+    });
+  } catch (error) {
+    console.error("[order-alert] could not push the kitchen alert", error);
   }
 }
