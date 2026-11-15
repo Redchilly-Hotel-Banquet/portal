@@ -178,20 +178,15 @@ export class OrderService {
     }
 
     // Orders placed by staff in the admin portal skip this; only guest orders alert the kitchen numbers.
-    await notifyNewOrder({
+    // The phone push goes out at the same time as the WhatsApp message, so a slow WhatsApp call never delays it.
+    const alert = {
       outletId: outletRef,
       locationId: location._id,
       specialInstructions: specialInstructions || null,
       total: subtotal,
       items: items.map((item) => ({ id: String(item.id), quantity: Number(item.quantity ?? 0), notes: item.notes ?? null })),
-    });
-    await pushNewOrder({
-      orderId,
-      outletId: outletRef,
-      locationId: location._id,
-      total: subtotal,
-      items: items.map((item) => ({ id: String(item.id), quantity: Number(item.quantity ?? 0), notes: item.notes ?? null })),
-    });
+    };
+    await Promise.all([pushNewOrder({ ...alert, orderId }), notifyNewOrder(alert)]);
 
     return { orderId, bookingId: resolvedBookingId };
   }

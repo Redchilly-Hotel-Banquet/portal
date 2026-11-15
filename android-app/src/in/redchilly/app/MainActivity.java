@@ -61,6 +61,8 @@ public class MainActivity extends Activity {
         s.setAllowFileAccess(false);
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setSupportZoom(false);
+        // Lets the website know it is inside the app (it then leaves the order alarm sound to the phone's notification).
+        s.setUserAgentString(s.getUserAgentString() + " RedChillyApp/1.4");
 
         web.addJavascriptInterface(new Bridge(), "RedChillyApp");
         web.setWebViewClient(new WebViewClient() {

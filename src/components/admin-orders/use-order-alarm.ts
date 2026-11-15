@@ -11,6 +11,9 @@ import {
 } from "./alarm";
 import type { AdminOrder } from "./types";
 
+/** The Android app already sounds the phone's own notification tone, so the page stays silent inside it. */
+const IN_APP = typeof navigator !== "undefined" && /RedChillyApp/.test(navigator.userAgent);
+
 type WakeLockSentinelLike = { release?: () => Promise<void>; addEventListener: (t: "release", cb: () => void) => void };
 type WakeLockNavigator = Navigator & { wakeLock?: { request?: (type: "screen") => Promise<WakeLockSentinelLike> } };
 
@@ -64,7 +67,7 @@ export function useOrderAlarm(orders: AdminOrder[] | undefined, audioRef: React.
       // wake lock unsupported or denied
     }
 
-    if (ok && pending.length > 0) {
+    if (ok && pending.length > 0 && !IN_APP) {
       startSiren(alarmRef);
       await playFallback();
     }
@@ -76,7 +79,7 @@ export function useOrderAlarm(orders: AdminOrder[] | undefined, audioRef: React.
       if (!audioEnabled) return;
       const ok = await unlockAudio(alarmRef);
       if (!ok) return;
-      if (open && pending.length > 0) {
+      if (open && pending.length > 0 && !IN_APP) {
         stopSiren(alarmRef);
         startSiren(alarmRef);
         await playFallback();
@@ -101,7 +104,7 @@ export function useOrderAlarm(orders: AdminOrder[] | undefined, audioRef: React.
     setPending(fresh.map((o) => o._id));
     setOpen(true);
 
-    if (audioEnabled) {
+    if (audioEnabled && !IN_APP) {
       startSiren(alarmRef);
       void playFallback();
     }
@@ -146,5 +149,6 @@ export function useOrderAlarm(orders: AdminOrder[] | undefined, audioRef: React.
     };
   }, [audioRef]);
 
-  return { audioEnabled, enableSound, alarmOpen: open, pendingIds: pending, acknowledge };
+  // Inside the app there is no sound to switch on, so it never asks.
+  return { audioEnabled: audioEnabled || IN_APP, enableSound, alarmOpen: open, pendingIds: pending, acknowledge };
 }
