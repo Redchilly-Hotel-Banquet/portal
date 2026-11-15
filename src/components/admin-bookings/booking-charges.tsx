@@ -117,7 +117,7 @@ export function BookingCharges({ booking, billing, loading, error }: Props) {
 
           <div>
             <h4 className="eyebrow mb-2">GST and total payable</h4>
-            <GstBreakdown gst={billing.gst} />
+            <GstBreakdown gst={billing.gst} extraCharges={billing.extraCharges} />
           </div>
 
           {billing.booking.payments?.length ? (

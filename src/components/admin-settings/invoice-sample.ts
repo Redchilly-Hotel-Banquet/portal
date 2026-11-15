@@ -24,6 +24,9 @@ export function sampleSummary(guestCount: number, types: DocumentTypeConfig[], i
     const images = type.photos.map((side) => ({ data_url: idPhoto(type.label, side) }));
     return {
       full_name: NAMES[index % NAMES.length],
+      age: 30 + index,
+      nationality: "Indian",
+      permanent_address: "12 MG Road, Lucknow, Uttar Pradesh 226001",
       phone: "+919876543210",
       document_type: type.value,
       document_number: type.value === "Passport" ? "N1234567" : "123412341234",
@@ -59,7 +62,7 @@ export function sampleSummary(guestCount: number, types: DocumentTypeConfig[], i
       checked_in_at: start.toISOString(),
       checked_out_at: out.toISOString(),
       rooms_allocated: roomLines,
-      checkin_details: { status: "COMPLETED", needs_special_assistance: false, other_requests: "", guests, assigned_rooms: [{ id: "r1", code: "101", type: "Standard", room_type: "Standard" }] },
+      checkin_details: { status: "COMPLETED", needs_special_assistance: false, other_requests: "", arriving_from: "Delhi", reason_for_stay: "Leisure", guests, assigned_rooms: [{ id: "r1", code: "101", type: "Standard", room_type: "Standard" }] },
       payments: [{ mode: "UPI", amount: 5984 }],
     },
     foodTotal: 640,

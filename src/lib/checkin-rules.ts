@@ -12,6 +12,8 @@ export type CheckinRules = {
   contact_either: boolean;
   /** At least one room assigned before marking checked in. */
   room: boolean;
+  /** Assign no more rooms than the reservation asked for. */
+  limit_rooms: boolean;
 };
 
 export const DEFAULT_CHECKIN_RULES: CheckinRules = {
@@ -22,6 +24,7 @@ export const DEFAULT_CHECKIN_RULES: CheckinRules = {
   contact_email: false,
   contact_either: false,
   room: true,
+  limit_rooms: true,
 };
 
 export const CHECKIN_RULE_FIELDS: ReadonlyArray<{ key: keyof CheckinRules; label: string; hint: string }> = [
@@ -32,6 +35,7 @@ export const CHECKIN_RULE_FIELDS: ReadonlyArray<{ key: keyof CheckinRules; label
   { key: "contact_email", label: "Email address", hint: "The booking contact's email, needed to mark the guest as checked in." },
   { key: "contact_either", label: "Phone or email (either one)", hint: "At least one of the two, whichever the guest has. Only matters if both of the switches above are optional." },
   { key: "room", label: "Room assigned", hint: "At least one room allocated, needed to mark the guest as checked in." },
+  { key: "limit_rooms", label: "Limit rooms to the number reserved", hint: "On: a reservation for one room can be given only one room at check-in. Off: reception may assign more." },
 ];
 
 export const normaliseCheckinRules = (value: unknown): CheckinRules => {

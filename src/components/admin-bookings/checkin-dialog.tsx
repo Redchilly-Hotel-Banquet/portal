@@ -70,6 +70,20 @@ function Body({ booking }: { booking: Booking }) {
         </div>
       </div>
 
+      <Block title="Booking">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="checkin-rooms">Rooms</Label>
+            <Input id="checkin-rooms" type="number" min={1} max={50} value={manager.roomsCount} onChange={(e) => manager.setRoomsCount(e.target.value)} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="checkin-guest-count">Guests</Label>
+            <Input id="checkin-guest-count" type="number" min={1} max={50} value={manager.guestCount} onChange={(e) => manager.setGuestCount(e.target.value)} />
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">As booked. Change them if a different number of rooms or guests turned up. Rooms sets how many rooms can be assigned below.</p>
+      </Block>
+
       <Block title="Contact">
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
@@ -116,6 +130,20 @@ function Body({ booking }: { booking: Booking }) {
         />
       </Block>
 
+      <Block title="Stay details">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="arriving-from">Arriving from</Label>
+            <Input id="arriving-from" value={manager.arrivingFrom} maxLength={150} onChange={(e) => manager.setArrivingFrom(e.target.value)} placeholder="City or place" autoComplete="off" />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="reason-for-stay">Reason for stay</Label>
+            <Input id="reason-for-stay" value={manager.reasonForStay} maxLength={150} onChange={(e) => manager.setReasonForStay(e.target.value)} placeholder="Business, leisure, family visit" autoComplete="off" />
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">Both are optional and print on the guest register section of the bill and invoice.</p>
+      </Block>
+
       <Block title="Arrival preferences">
         <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[auto_1fr]">
           <dt className="text-muted-foreground">Expected arrival</dt>
@@ -130,7 +158,7 @@ function Body({ booking }: { booking: Booking }) {
       </Block>
 
       <Block title="Assign rooms">
-        <RoomPicker rooms={context.availableRooms} selected={manager.selectedRooms} onToggle={manager.toggleRoom} />
+        <RoomPicker rooms={context.availableRooms} selected={manager.selectedRooms} onToggle={manager.toggleRoom} limit={manager.rules.limit_rooms ? manager.roomsBooked : undefined} />
       </Block>
 
       <div className="flex items-center justify-between gap-4 rounded-md border bg-surface p-4">

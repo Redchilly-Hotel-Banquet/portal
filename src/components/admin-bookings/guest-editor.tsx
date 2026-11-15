@@ -7,13 +7,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { PhoneInput } from "@/components/ui/phone-input";
 import { Label } from "@/components/ui/label";
 import { DocumentPhotos } from "@/components/stay/checkin/document-photos";
 import { useDocumentTypes } from "@/hooks/useDocumentTypes";
 import { photoSpecsFor } from "@/lib/document-types";
 import { sideImage, withSideImage } from "@/lib/document-photos";
-import { guestStatus, isGuestComplete, MAX_ADMIN_GUESTS, type AdminGuest, type Completeness } from "./checkin-guests";
+import { ageError, guestStatus, isGuestComplete, MAX_ADMIN_GUESTS, type AdminGuest, type Completeness } from "./checkin-guests";
 import { SignaturePad } from "./signature-pad";
 import { optionalPhoneError } from "@/lib/phone";
 import { DEFAULT_CHECKIN_RULES, type CheckinRules } from "@/lib/checkin-rules";
@@ -65,6 +66,25 @@ function GuestCard({ guest, index, removable, onChange, onRemove, onPreview, rul
         <div className="space-y-1.5 sm:col-span-2">
           <Label htmlFor={`${id}-name`}>Full name</Label>
           <Input id={`${id}-name`} value={guest.fullName} onChange={(e) => onChange({ fullName: e.target.value })} autoComplete="off" />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor={`${id}-age`}>
+            Age <span className="text-xs font-normal text-muted-foreground">Optional</span>
+          </Label>
+          <Input id={`${id}-age`} inputMode="numeric" value={guest.age} onChange={(e) => onChange({ age: e.target.value.replace(/\D/g, "").slice(0, 3) })} autoComplete="off" />
+          {ageError(guest.age) ? <p className="text-xs text-destructive">{ageError(guest.age)}</p> : null}
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor={`${id}-nationality`}>
+            Nationality <span className="text-xs font-normal text-muted-foreground">Optional</span>
+          </Label>
+          <Input id={`${id}-nationality`} value={guest.nationality} placeholder="Indian" onChange={(e) => onChange({ nationality: e.target.value })} autoComplete="off" />
+        </div>
+        <div className="space-y-1.5 sm:col-span-2">
+          <Label htmlFor={`${id}-address`}>
+            Permanent address <span className="text-xs font-normal text-muted-foreground">Optional</span>
+          </Label>
+          <Textarea id={`${id}-address`} rows={2} maxLength={300} value={guest.permanentAddress} onChange={(e) => onChange({ permanentAddress: e.target.value })} autoComplete="off" />
         </div>
         <div className="space-y-1.5 sm:col-span-2">
           <Label htmlFor={`${id}-phone`}>

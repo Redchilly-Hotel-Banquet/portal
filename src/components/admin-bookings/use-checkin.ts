@@ -11,7 +11,6 @@ import { optionalPhoneError } from "@/lib/phone";
 import type { Booking, CheckinContext } from "./types";
 import {
   blankGuest,
-  bookedGuestCount,
   buildGuestPayload,
   completionIssues,
   hasDetails,
@@ -36,6 +35,10 @@ export function useCheckinManager(booking: Booking | null) {
   const [guests, setGuests] = useState<AdminGuest[]>([]);
   const [contactPhone, setContactPhone] = useState("");
   const [contactEmail, setContactEmail] = useState("");
+  const [roomsCount, setRoomsCount] = useState("1");
+  const [guestCount, setGuestCount] = useState("1");
+  const [arrivingFrom, setArrivingFrom] = useState("");
+  const [reasonForStay, setReasonForStay] = useState("");
 
   // Which documents are accepted, and how many photos each needs (this also keeps the completeness checks up to date).
   const documentTypes = useDocumentTypes();
@@ -50,9 +53,15 @@ export function useCheckinManager(booking: Booking | null) {
 
   const hydrate = useCallback((payload: CheckinContext, fallbackStatus?: string) => {
     setContext(payload);
-    setGuests(seedGuests(payload));
+    const seeded = seedGuests(payload);
+    setGuests(seeded);
     setContactPhone(payload.booking?.guest_phone ?? "");
     setContactEmail(payload.booking?.guest_email ?? "");
+    setRoomsCount(String(Math.max(Number(payload.booking?.rooms_requested) || 1, 1)));
+    // The count at the top always matches the guest forms below.
+    setGuestCount(String(Math.max(seeded.length, 1)));
+    setArrivingFrom(payload.checkinDetails?.arriving_from ?? "");
+    setReasonForStay(payload.checkinDetails?.reason_for_stay ?? "");
     setSelectedRooms(assignedRoomIds(payload));
     setMarkComplete(isCheckinComplete(payload, fallbackStatus));
   }, []);
@@ -96,7 +105,8 @@ export function useCheckinManager(booking: Booking | null) {
     });
   }, []);
 
-  const booked = context ? bookedGuestCount(context) : booking?.number_of_guests || 1;
+  const roomsBooked = Math.max(Math.floor(Number(roomsCount)) || 1, 1);
+  const booked = Math.max(Math.floor(Number(guestCount)) || 1, 1);
   // Someone has to be reachable: the booking contact below, or any guest's own number.
   const hasPhone = Boolean(contactPhone.trim() || guests.some((guest) => guest.phone.trim()));
   const hasEmail = Boolean(contactEmail.trim());
@@ -107,23 +117,58 @@ export function useCheckinManager(booking: Booking | null) {
     setGuests((prev) => prev.map((guest) => (guest.key === key ? { ...guest, ...patch } : guest)));
   }, []);
 
+  // The Guests number and the guest forms move together: adding or removing a form changes the number.
   const addGuest = useCallback(() => {
-    setGuests((prev) => (prev.length >= MAX_ADMIN_GUESTS ? prev : [...prev, blankGuest()]));
+    setGuests((prev) => {
+      if (prev.length >= MAX_ADMIN_GUESTS) return prev;
+      setGuestCount(String(prev.length + 1));
+      return [...prev, blankGuest()];
+    });
   }, []);
 
   const removeGuest = useCallback(
     (key: string) => {
       // At least one guest always stays.
-      setGuests((prev) => (prev.length > 1 ? prev.filter((guest) => guest.key !== key) : prev));
+      setGuests((prev) => {
+        if (prev.length <= 1) return prev;
+        setGuestCount(String(prev.length - 1));
+        return prev.filter((guest) => guest.key !== key);
+      });
     },
     [],
   );
 
+  // Typing a new number adds blank forms, or drops empty forms from the end. A form with details is never dropped silently.
+  const changeGuestCount = useCallback((value: string) => {
+    setGuestCount(value);
+    const wanted = Math.floor(Number(value));
+    if (!Number.isFinite(wanted) || wanted < 1) return;
+    const target = Math.min(wanted, MAX_ADMIN_GUESTS);
+    setGuests((prev) => {
+      let next = prev;
+      if (target > prev.length) next = [...prev, ...Array.from({ length: target - prev.length }, () => blankGuest())];
+      else {
+        next = [...prev];
+        while (next.length > target) {
+          const last = next[next.length - 1];
+          if (last.fullName.trim() || last.documentNumber.trim() || last.imageDataUrl || last.signature || last.savedIndex !== null) break;
+          next.pop();
+        }
+      }
+      if (next.length !== target) setGuestCount(String(next.length));
+      return next;
+    });
+  }, []);
+
   const save = useCallback(async () => {
     if (!booking || !context) return;
     const details = context.checkinDetails;
+    if (!Number.isInteger(Number(roomsCount)) || Number(roomsCount) < 1 || !Number.isInteger(Number(guestCount)) || Number(guestCount) < 1) {
+      toast.error("Rooms and guests must be whole numbers of at least 1.");
+      return;
+    }
     if (!guests.every((guest) => hasDetails(guest, rules))) {
-      toast.error(`Each guest needs a name${rules.document_number ? ", ID number" : ""}${rules.document_photo ? " and ID photo" : ""}, and any mobile number must be valid, before saving.`);
+      toast.error(`Each guest needs a name${rules.document_number ? ", ID number" : ""}${rules.document_photo ? " and ID photo" : ""}, and any mobile number or age must be valid, before saving.`);
       return;
     }
     if (contactError) {
@@ -152,6 +197,10 @@ export function useCheckinManager(booking: Booking | null) {
           needsSpecialAssistance: Boolean(details?.needs_special_assistance),
           specialAssistanceDetails: details?.special_assistance_details ?? "",
           otherRequests: details?.other_requests ?? "",
+          roomsRequested: Number(roomsCount),
+          guestsCount: Number(guestCount),
+          arrivingFrom: arrivingFrom.trim(),
+          reasonForStay: reasonForStay.trim(),
           assignedRoomIds: selectedRooms,
           contact: { phone: contactPhone.trim(), email: contactEmail.trim() },
         },
@@ -168,7 +217,7 @@ export function useCheckinManager(booking: Booking | null) {
     } finally {
       setSaving(false);
     }
-  }, [booking, context, contactError, contactEmail, contactPhone, guests, hydrate, issues, markComplete, queryClient, rules, selectedRooms]);
+  }, [booking, context, contactError, contactEmail, contactPhone, roomsCount, guestCount, arrivingFrom, reasonForStay, guests, hydrate, issues, markComplete, queryClient, rules, selectedRooms]);
 
   return {
     context,
@@ -181,6 +230,11 @@ export function useCheckinManager(booking: Booking | null) {
     setMarkComplete,
     guests,
     booked,
+    roomsBooked,
+    roomsCount,
+    guestCount,
+    setRoomsCount,
+    setGuestCount: changeGuestCount,
     issues,
     rules,
     contactPhone,
@@ -190,6 +244,10 @@ export function useCheckinManager(booking: Booking | null) {
     hasEmail,
     setContactPhone,
     setContactEmail,
+    arrivingFrom,
+    reasonForStay,
+    setArrivingFrom,
+    setReasonForStay,
     updateGuest,
     addGuest,
     removeGuest,

@@ -17,6 +17,7 @@ export type InvoiceShow = {
   amount_payable: boolean;
   pay_total: boolean;
   heading_name: boolean;
+  logo: boolean;
   heading_code: boolean;
   charges: boolean;
   charge_headings: boolean;
@@ -70,6 +71,17 @@ export type InvoiceShow = {
   payments: boolean;
   balance_due: boolean;
   guest_verification: boolean;
+  register: boolean;
+  reg_age: boolean;
+  reg_nationality: boolean;
+  reg_address: boolean;
+  reg_arriving_from: boolean;
+  reg_arrival: boolean;
+  reg_reason: boolean;
+  reg_duration: boolean;
+  reg_room: boolean;
+  reg_guest_signature: boolean;
+  reg_manager_signature: boolean;
   document_numbers: boolean;
   id_photos: boolean;
   signatures: boolean;
@@ -135,6 +147,7 @@ export const DEFAULT_INVOICE_SETTINGS: InvoiceSettings = {
     amount_payable: true,
     pay_total: true,
     heading_name: true,
+    logo: false,
     heading_code: true,
     charges: true,
     charge_headings: true,
@@ -188,6 +201,17 @@ export const DEFAULT_INVOICE_SETTINGS: InvoiceSettings = {
     payments: true,
     balance_due: true,
     guest_verification: true,
+    register: true,
+    reg_age: true,
+    reg_nationality: true,
+    reg_address: true,
+    reg_arriving_from: true,
+    reg_arrival: true,
+    reg_reason: true,
+    reg_duration: true,
+    reg_room: true,
+    reg_guest_signature: true,
+    reg_manager_signature: true,
     document_numbers: true,
     id_photos: true,
     signatures: true,
@@ -225,6 +249,7 @@ export const INVOICE_FIELD_GROUPS: ReadonlyArray<InvoiceSection> = [
     spacer: "after_header",
     all: true,
     fields: [
+      { key: "logo", label: "Red Chilly logo", hint: "The Red Chilly logo at the top left, before the branch name." },
       { key: "heading_name", label: "Branch name", hint: "The branch's name at the top left." },
       { key: "branch_address", label: "Branch address", hint: "The invoice address from the branch's settings." },
       { key: "branch_phone", label: "Branch phone", hint: "Shown under the address." },
@@ -250,6 +275,22 @@ export const INVOICE_FIELD_GROUPS: ReadonlyArray<InvoiceSection> = [
       { key: "booked_on", label: "Booked on", hint: "When the booking was made." },
       { key: "checked_in_at", label: "Checked in", hint: "When the guest arrived." },
       { key: "checked_out_at", label: "Checked out", hint: "When the guest left." },
+    ],
+  },
+  {
+    title: "Guest register",
+    master: "register",
+    fields: [
+      { key: "reg_age", label: "Age", hint: "Each guest's age, entered at check-in." },
+      { key: "reg_nationality", label: "Nationality", hint: "Each guest's nationality, entered at check-in." },
+      { key: "reg_address", label: "Permanent address", hint: "Each guest's permanent address, entered at check-in." },
+      { key: "reg_arriving_from", label: "Arriving from", hint: "Where the guest travelled from, entered at check-in." },
+      { key: "reg_arrival", label: "Date and time of arrival", hint: "When the guest checked in, or the expected arrival before that." },
+      { key: "reg_reason", label: "Reason for stay", hint: "Entered at check-in." },
+      { key: "reg_duration", label: "Duration of stay", hint: "Check-in and check-out dates with the number of nights." },
+      { key: "reg_room", label: "Room number", hint: "The room or rooms the guest was given." },
+      { key: "reg_guest_signature", label: "Signature of guest", hint: "The signature taken at check-in, or an empty line to sign." },
+      { key: "reg_manager_signature", label: "Signature of manager or authorised person", hint: "An empty line for the hotel's representative to sign." },
     ],
   },
   {

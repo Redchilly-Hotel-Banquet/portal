@@ -27,11 +27,6 @@ import { useCreateBooking } from "./use-bookings";
 
 type RoomCategory = { category: string; available_count: number; min_rate: number; max_rate: number };
 
-const rateLabel = (category: RoomCategory) =>
-  category.min_rate === category.max_rate
-    ? `${formatINR(category.min_rate)}/night`
-    : `${formatINR(category.min_rate)} - ${formatINR(category.max_rate)}/night`;
-
 const EMPTY_FORM: CreateBookingForm = {
   outlet_id: "",
   guest_name: "",
@@ -44,6 +39,11 @@ const EMPTY_FORM: CreateBookingForm = {
   preferred_room_type: "",
   special_requests: "",
   total_amount: "",
+  is_ota: false,
+  ota_name: "",
+  ota_payment_status: "",
+  additional_charge: "",
+  additional_charge_reason: "",
 };
 
 type Props = {
@@ -131,7 +131,8 @@ export function CreateBookingDialog({ open, onOpenChange, outlets, defaultOutlet
 
   // Suggest the highest nightly rate of the chosen type for the whole stay: nights x rooms x rate.
   useEffect(() => {
-    if (totalEdited) return;
+    // OTA bookings carry whatever the OTA charged, so reception types it; other bookings are priced from the room type.
+    if (totalEdited || form.is_ota) return;
     if (!selectedCategory || !validDates) {
       setForm((prev) => (prev.total_amount ? { ...prev, total_amount: "" } : prev));
       return;
@@ -140,7 +141,7 @@ export function CreateBookingDialog({ open, onOpenChange, outlets, defaultOutlet
     const rooms = Math.max(Number.parseInt(form.rooms_requested, 10) || 1, 1);
     const suggested = String(Number((selectedCategory.max_rate * nights * rooms).toFixed(2)));
     setForm((prev) => (prev.total_amount === suggested ? prev : { ...prev, total_amount: suggested }));
-  }, [selectedCategory, validDates, totalEdited, form.check_in_date, form.check_out_date, form.rooms_requested]);
+  }, [selectedCategory, validDates, totalEdited, form.is_ota, form.check_in_date, form.check_out_date, form.rooms_requested]);
 
   // A type picked for other dates or another branch may no longer exist; make the receptionist choose again.
   useEffect(() => {
@@ -150,7 +151,7 @@ export function CreateBookingDialog({ open, onOpenChange, outlets, defaultOutlet
     }
   }, [categoriesQuery.data, form.preferred_room_type]);
 
-  const set = (field: keyof CreateBookingForm, value: string) => setForm((prev) => ({ ...prev, [field]: value }));
+  const set = (field: keyof CreateBookingForm, value: string | boolean) => setForm((prev) => ({ ...prev, [field]: value }));
   const fail = (message: string) => toast.error(message);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -163,6 +164,8 @@ export function CreateBookingDialog({ open, onOpenChange, outlets, defaultOutlet
       return fail("Branch, guest details and stay dates are required.");
     }
     if (!roomType) return fail("Select the preferred room type.");
+    if (form.is_ota && !form.ota_name) return fail("Select the OTA.");
+    if (form.is_ota && !form.ota_payment_status) return fail("Select the OTA payment status.");
 
     const checkIn = new Date(form.check_in_date);
     const checkOut = new Date(form.check_out_date);
@@ -183,6 +186,15 @@ export function CreateBookingDialog({ open, onOpenChange, outlets, defaultOutlet
       total = Number(parsed.toFixed(2));
     }
 
+    let extra: number | undefined;
+    const extraText = form.additional_charge.trim();
+    if (extraText) {
+      const parsed = Number(extraText);
+      if (!Number.isFinite(parsed) || parsed <= 0) return fail("Enter a valid additional charge or leave it blank.");
+      if (!form.additional_charge_reason.trim()) return fail("Give a reason for the additional charge.");
+      extra = Number(parsed.toFixed(2));
+    }
+
     const payload: Record<string, unknown> = {
       outlet_id: form.outlet_id,
       rooms_requested: rooms,
@@ -196,6 +208,15 @@ export function CreateBookingDialog({ open, onOpenChange, outlets, defaultOutlet
       special_requests: form.special_requests.trim() || null,
     };
     if (total !== undefined) payload.total_amount = total;
+    if (extra !== undefined) {
+      payload.additional_charge = extra;
+      payload.additional_charge_reason = form.additional_charge_reason.trim();
+    }
+    if (form.is_ota) {
+      payload.is_ota = true;
+      payload.ota_name = form.ota_name;
+      payload.ota_payment_status = form.ota_payment_status;
+    }
     submitted.current = form;
     mutation.mutate(payload);
   };
@@ -254,13 +275,59 @@ export function CreateBookingDialog({ open, onOpenChange, outlets, defaultOutlet
             <Field id="create-checkout" label="Check-out *">
               <Input id="create-checkout" type="date" min={form.check_in_date || undefined} value={form.check_out_date} onChange={(e) => set("check_out_date", e.target.value)} required />
             </Field>
+            <Field id="create-ota" label="Is OTA?" className="sm:col-span-2">
+              <Select
+                value={form.is_ota ? "yes" : "no"}
+                onValueChange={(v) => {
+                  const ota = v === "yes";
+                  setForm((prev) => ({ ...prev, is_ota: ota, ota_name: ota ? prev.ota_name : "", ota_payment_status: ota ? prev.ota_payment_status : "" }));
+                  // Back to a normal booking: price from the room type again.
+                  if (!ota) setTotalEdited(false);
+                }}
+              >
+                <SelectTrigger id="create-ota">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="no">No</SelectItem>
+                  <SelectItem value="yes">Yes</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            {form.is_ota ? (
+              <>
+                <Field id="create-ota-name" label="OTA *">
+                  <Select value={form.ota_name} onValueChange={(v) => set("ota_name", v)}>
+                    <SelectTrigger id="create-ota-name">
+                      <SelectValue placeholder="Select OTA" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="OYO">OYO</SelectItem>
+                      <SelectItem value="Others">Others</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field id="create-ota-payment" label="Payment status *">
+                  <Select value={form.ota_payment_status} onValueChange={(v) => set("ota_payment_status", v)}>
+                    <SelectTrigger id="create-ota-payment">
+                      <SelectValue placeholder="Select payment status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="PRE_PAID">Pre-Paid</SelectItem>
+                      <SelectItem value="PARTIALLY_PAID">Partially-Paid</SelectItem>
+                      <SelectItem value="PAY_AT_HOTEL">Pay At Hotel</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+              </>
+            ) : null}
             <Field
               id="create-room-type"
               label="Preferred room type *"
               className="sm:col-span-2"
               hint={
                 selectedCategory
-                  ? `${rateLabel(selectedCategory)} for these dates, ${selectedCategory.available_count} available.`
+                  ? `${selectedCategory.available_count} available for these dates.`
                   : undefined
               }
             >
@@ -285,14 +352,20 @@ export function CreateBookingDialog({ open, onOpenChange, outlets, defaultOutlet
                 <SelectContent>
                   {categories.map((entry) => (
                     <SelectItem key={entry.category} value={entry.category}>
-                      {entry.category} - {rateLabel(entry)}
+                      {entry.category}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </Field>
-            <Field id="create-total" label="Negotiated total (INR)" hint="Filled with the highest available rate for the chosen room type, for all nights and rooms. Edit it to agree a different total." className="sm:col-span-2">
+            <Field id="create-total" label="Negotiated total (INR)" hint={form.is_ota ? "Enter the total the OTA shows for the whole stay." : "Filled with the highest available rate for the chosen room type, for all nights and rooms. Edit it to agree a different total."} className="sm:col-span-2">
               <Input id="create-total" type="number" inputMode="decimal" min={0} step="0.01" value={form.total_amount} onChange={(e) => { setTotalEdited(true); set("total_amount", e.target.value); }} placeholder="Agreed total for the whole stay" />
+            </Field>
+            <Field id="create-extra" label="Additional charge (INR)" hint="Optional. Added to the bill on top of the total, without GST." className="sm:col-span-2">
+              <Input id="create-extra" type="number" inputMode="decimal" min={0} step="0.01" value={form.additional_charge} onChange={(e) => set("additional_charge", e.target.value)} placeholder="0" />
+            </Field>
+            <Field id="create-extra-reason" label={form.additional_charge.trim() ? "Reason *" : "Reason"} className="sm:col-span-2">
+              <Input id="create-extra-reason" maxLength={120} value={form.additional_charge_reason} onChange={(e) => set("additional_charge_reason", e.target.value)} placeholder="Early check-in, late check-out" autoComplete="off" />
             </Field>
             <Field id="create-notes" label="Special requests" className="sm:col-span-2">
               <Textarea id="create-notes" rows={3} value={form.special_requests} onChange={(e) => set("special_requests", e.target.value)} />

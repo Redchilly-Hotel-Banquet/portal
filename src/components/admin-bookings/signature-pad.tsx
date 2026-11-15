@@ -11,10 +11,12 @@ type Props = {
   value: string;
   /** Signature stored on the server, offered as a one-click restore. */
   savedValue?: string;
+  /** What to say under the pad while it is empty. */
+  hint?: string;
   onChange: (dataUrl: string) => void;
 };
 
-export function SignaturePad({ value, savedValue, onChange }: Props) {
+export function SignaturePad({ value, savedValue, hint = "Ask the guest to sign here during verification.", onChange }: Props) {
   const padRef = useRef<SignatureCanvas | null>(null);
   const frameRef = useRef<HTMLDivElement | null>(null);
   const lastEmitted = useRef<string>("");
@@ -85,7 +87,7 @@ export function SignaturePad({ value, savedValue, onChange }: Props) {
           </Button>
         ) : null}
         <p className="text-xs text-muted-foreground">
-          {value ? "Signature captured." : "Ask the guest to sign here during verification."}
+          {value ? "Signature captured." : hint}
         </p>
       </div>
     </div>

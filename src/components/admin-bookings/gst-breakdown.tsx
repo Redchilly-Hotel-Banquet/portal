@@ -1,13 +1,14 @@
 import { Fragment } from "react";
 import { formatINR } from "@/components/admin/format";
 import { gstBasis } from "./invoice-lines";
-import type { GstSummary } from "./types";
+import type { ExtraCharge, GstSummary } from "./types";
 
 /**
  * The bill worked out step by step: each charge, the GST on it and why that rate applies, then the totals.
  * Used by the checkout form and the bill panel.
  */
-export function GstBreakdown({ gst, className }: { gst: GstSummary; className?: string }) {
+export function GstBreakdown({ gst, extraCharges = [], className }: { gst: GstSummary; extraCharges?: ExtraCharge[]; className?: string }) {
+  const extraTotal = Math.round(extraCharges.reduce((sum, entry) => sum + entry.amount, 0) * 100) / 100;
   return (
     <dl className={`divide-y rounded-md border bg-card px-4 text-sm ${className ?? ""}`}>
       {gst.lines.map((line, index) => (
@@ -24,7 +25,10 @@ export function GstBreakdown({ gst, className }: { gst: GstSummary; className?: 
       <Row label="Total before GST" value={formatINR(gst.taxable)} />
       <Row label={`Total GST (CGST ${formatINR(gst.cgst)} + SGST ${formatINR(gst.sgst)})`} value={`+ ${formatINR(gst.gst)}`} />
       {gst.roundOff !== 0 ? <Row small label="Round off to the nearest rupee" value={`${gst.roundOff > 0 ? "+" : "-"} ${formatINR(Math.abs(gst.roundOff))}`} /> : null}
-      <Row strong label="Total payable" value={formatINR(gst.total)} />
+      {extraCharges.map((entry) => (
+        <Row key={entry.id} label={`${entry.description} (extra charge, no GST)`} value={`+ ${formatINR(entry.amount)}`} />
+      ))}
+      <Row strong label="Total payable" value={formatINR(Math.round((gst.total + extraTotal) * 100) / 100)} />
     </dl>
   );
 }

@@ -13,6 +13,10 @@ export const DEFAULT_DOCUMENT_TYPE = DOCUMENT_TYPES[0].value;
 export type AdminGuest = {
   key: string;
   fullName: string;
+  /** Guest register details; all optional. */
+  age: string;
+  nationality: string;
+  permanentAddress: string;
   /** Optional; lets reception send the stay details to this guest on WhatsApp. */
   phone: string;
   documentType: string;
@@ -31,6 +35,9 @@ export type AdminGuest = {
 
 export type GuestPayload = {
   fullName: string;
+  age: string;
+  nationality: string;
+  permanentAddress: string;
   phone: string;
   documentType: string;
   documentNumber: string;
@@ -48,6 +55,9 @@ const nextKey = () => `guest-${Date.now()}-${counter++}`;
 export const blankGuest = (): AdminGuest => ({
   key: nextKey(),
   fullName: "",
+  age: "",
+  nationality: "",
+  permanentAddress: "",
   phone: "",
   documentType: DEFAULT_DOCUMENT_TYPE,
   documentNumber: "",
@@ -70,6 +80,9 @@ export function seedGuests(context: CheckinContext): AdminGuest[] {
   const guests: AdminGuest[] = stored.map((guest, index) => ({
     key: nextKey(),
     fullName: guest.full_name ?? "",
+    age: guest.age != null ? String(guest.age) : "",
+    nationality: guest.nationality ?? "",
+    permanentAddress: guest.permanent_address ?? "",
     phone: guest.phone ?? (index === 0 ? normalisePhone(context.booking?.guest_phone) ?? "" : ""),
     documentType: guest.document_type || DEFAULT_DOCUMENT_TYPE,
     documentNumber: guest.document_number ?? "",
@@ -97,8 +110,17 @@ export function seedGuests(context: CheckinContext): AdminGuest[] {
 }
 
 /** Enough to save: a name, and whatever Settings says must be captured. The signature is only needed to finish. */
+/** An age is optional, but when given it must be a whole number from 0 to 120. */
+export const ageError = (age: string): string | null => {
+  const text = age.trim();
+  if (!text) return null;
+  const value = Number(text);
+  return Number.isInteger(value) && value >= 0 && value <= 120 ? null : "Enter an age between 0 and 120.";
+};
+
 export const hasDetails = (guest: AdminGuest, rules: CheckinRules = DEFAULT_CHECKIN_RULES): boolean =>
   !optionalPhoneError(guest.phone) &&
+  !ageError(guest.age) &&
   Boolean(guest.fullName.trim()) &&
   (!rules.document_number || Boolean(guest.documentNumber.trim())) &&
   (!rules.document_photo || hasAllPhotos(guest, photoSpecsOf(guest.documentType)));
@@ -138,6 +160,9 @@ export function buildGuestPayload(guests: AdminGuest[]): GuestPayload[] {
     const moved = guest.savedIndex !== index;
     const item: GuestPayload = {
       fullName: guest.fullName.trim(),
+      age: guest.age.trim(),
+      nationality: guest.nationality.trim(),
+      permanentAddress: guest.permanentAddress.trim(),
       phone: guest.phone.trim(),
       documentType: guest.documentType,
       documentNumber: guest.documentNumber.trim(),

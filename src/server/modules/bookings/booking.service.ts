@@ -1,3 +1,5 @@
+import { randomUUID } from "crypto";
+import { signatureOf } from "../staff/staff-signature.service";
 import { mongoConnection } from "../../mongo";
 import { HttpError } from "../../httpError";
 import { AuthenticatedUser } from "../../session";
@@ -49,8 +51,11 @@ type OutletRecord = Record<string, unknown> & {
 };
 
 type ManageBookingsRequest = ExtendRequest & {
-  action: "list" | "update_status" | "update_amount" | "extension_options" | "extend_stay" | "update_stay_rate" | "split_stay_lines" | "discard_new";
+  action: "list" | "update_status" | "update_amount" | "extension_options" | "extend_stay" | "update_stay_rate" | "split_stay_lines" | "discard_new" | "add_extra_charge" | "remove_extra_charge";
   status?: string;
+  description?: string;
+  amount?: number | string;
+  chargeId?: string;
   totalAmount?: number;
 };
 
@@ -92,6 +97,11 @@ type CreatePublicBookingRequest = {
   guestsCount?: number;
   special_requests?: string;
   specialRequests?: string;
+  is_ota?: boolean;
+  ota_name?: string;
+  ota_payment_status?: string;
+  additional_charge?: number | string;
+  additional_charge_reason?: string;
 };
 
 type OrderDocument = {
@@ -470,7 +480,7 @@ const last4 = (value: unknown): string | null => {
  */
 const summariseCheckin = (details: Record<string, any> | null | undefined) => {
   if (!details) return null;
-  const { guests, signature, ...rest } = details;
+  const { guests, signature, staff_signature: _staffSignature, ...rest } = details;
   return {
     ...rest,
     guests: (Array.isArray(guests) ? guests : []).map((guest: any) => ({
@@ -504,7 +514,7 @@ const normaliseBooking = (doc: any, includeCheckinId = false) => {
 };
 
 export class BookingService {
-  async createPublic(request: CreatePublicBookingRequest, userId?: string | null) {
+  async createPublic(request: CreatePublicBookingRequest, userId?: string | null, staff = false) {
     const outletIdRaw = normaliseString(
       request?.outlet_id ?? request?.outletId,
     );
@@ -588,6 +598,28 @@ export class BookingService {
       roomsRequested,
     );
 
+    // Booking source (OTA, and how it is paid) is recorded by staff only.
+    let ota: { is_ota: true; ota_name: string; ota_payment_status: string } | null = null;
+    if (staff && request?.is_ota === true) {
+      const otaName = normaliseString(request.ota_name);
+      if (!["OYO", "Others"].includes(otaName)) throw new HttpError(400, "Choose the OTA: OYO or Others.");
+      const paymentStatus = normaliseString(request.ota_payment_status);
+      if (!["PRE_PAID", "PARTIALLY_PAID", "PAY_AT_HOTEL"].includes(paymentStatus)) {
+        throw new HttpError(400, "Choose the OTA payment status: Pre-Paid, Partially-Paid or Pay At Hotel.");
+      }
+      ota = { is_ota: true, ota_name: otaName, ota_payment_status: paymentStatus };
+    }
+
+    // An extra charge agreed up front (early check-in, late check-out, ...) goes on the bill like any other; staff only.
+    const extraCharges: Array<Record<string, unknown>> = [];
+    if (staff && request?.additional_charge !== undefined && request.additional_charge !== "" && request.additional_charge !== null) {
+      const amount = Math.round(Number(request.additional_charge) * 100) / 100;
+      const reason = normaliseString(request.additional_charge_reason).slice(0, 120);
+      if (!Number.isFinite(amount) || amount <= 0) throw new HttpError(400, "The additional charge must be greater than zero.");
+      if (!reason) throw new HttpError(400, "Give a reason for the additional charge.");
+      extraCharges.push({ id: randomUUID(), description: reason, amount, added_at: new Date() });
+    }
+
     const now = new Date();
     const db = mongoConnection.getDb();
     const bookingsCollection = db.collection<BookingRecord>("bookings");
@@ -609,6 +641,8 @@ export class BookingService {
         preferred_categories: preferredCategories,
         total_amount: Number(totalAmount.toFixed(2)),
         special_requests: specialRequests,
+        ...(ota ?? { is_ota: false }),
+        ...(extraCharges.length ? { extra_charges: extraCharges } : {}),
         booking_code: bookingCode,
         checkin_id: checkinId,
         // Set from the verified session, never from the request body.
@@ -795,6 +829,35 @@ export class BookingService {
             outlets: null,
           },
         };
+      }
+
+      case "add_extra_charge":
+      case "remove_extra_charge": {
+        if (!request.id) throw new HttpError(400, "id is required");
+        const filter = { _id: resolveDocumentId(request.id, "Invalid booking id") };
+        const target = await bookingsCollection.findOne(filter);
+        if (!target) throw new HttpError(404, "Booking not found");
+        assertOutlet(user, target.outlet_id);
+        // Extra charges join the bill before check-out; once the bill is closed it cannot change.
+        if (["CHECKED_OUT", "CANCELLED"].includes(String(target.status).toUpperCase())) {
+          throw new HttpError(409, "Extra charges can only be changed before check-out.");
+        }
+        const now = new Date();
+        if (request.action === "add_extra_charge") {
+          const description = normaliseString(request.description).slice(0, 120);
+          const amount = Math.round(Number(request.amount) * 100) / 100;
+          if (!description) throw new HttpError(400, "Describe the charge, for example Broken glass.");
+          if (!Number.isFinite(amount) || amount <= 0) throw new HttpError(400, "Enter an amount greater than zero.");
+          await bookingsCollection.updateOne(filter, {
+            $push: { extra_charges: { id: randomUUID(), description, amount, added_at: now, added_by: whoRef({ id: user.id ?? "unknown", name: user.name ?? "Staff" }) } },
+            $set: { updated_at: now },
+          } as any);
+        } else {
+          const chargeId = normaliseString(request.chargeId);
+          if (!chargeId) throw new HttpError(400, "chargeId is required");
+          await bookingsCollection.updateOne(filter, { $pull: { extra_charges: { id: chargeId } }, $set: { updated_at: now } } as any);
+        }
+        return { booking: normaliseBooking(await bookingsCollection.findOne(filter), true) };
       }
 
       case "update_amount": {
@@ -1107,8 +1170,30 @@ export class BookingService {
               ? normaliseGuestPhone(guest.phone ?? guest.phoneNumber, `Guest ${index + 1}`)
               : (existingGuest?.phone ?? null);
 
+          // Register details (age, nationality, permanent address). Left out of the request means "keep what is saved".
+          const hasKey = (...keys: string[]) => Boolean(guest) && keys.some((key) => key in guest);
+          let age: number | null = existingGuest?.age ?? null;
+          if (hasKey("age")) {
+            const rawAge = normaliseString(guest.age);
+            if (!rawAge) age = null;
+            else {
+              const parsed = Number(rawAge);
+              if (!Number.isInteger(parsed) || parsed < 0 || parsed > 120) {
+                throw new HttpError(400, `Guest ${index + 1}: enter a valid age between 0 and 120.`);
+              }
+              age = parsed;
+            }
+          }
+          const nationality = hasKey("nationality") ? normaliseString(guest.nationality).slice(0, 60) || null : (existingGuest?.nationality ?? null);
+          const permanentAddress = hasKey("permanentAddress", "permanent_address")
+            ? normaliseString(guest.permanentAddress ?? guest.permanent_address).slice(0, 300) || null
+            : (existingGuest?.permanent_address ?? null);
+
           return {
             full_name: fullName,
+            age,
+            nationality,
+            permanent_address: permanentAddress,
             phone,
             document_type: documentType,
             document_number: documentNumber,
@@ -1147,6 +1232,23 @@ export class BookingService {
         ? normaliseString(checkinData.specialAssistanceDetails)
         : "";
       const otherRequests = normaliseString(checkinData.otherRequests);
+      // Where the guest is coming from and why they are staying. Left out of the request means "keep what is saved".
+      const stayText = (camel: string, snake: string, max: number): string | null =>
+        camel in checkinData || snake in checkinData
+          ? normaliseString(checkinData[camel] ?? checkinData[snake]).slice(0, max) || null
+          : ((previousDetails[snake] as string | null | undefined) ?? null);
+      const arrivingFrom = stayText("arrivingFrom", "arriving_from", 150);
+      const reasonForStay = stayText("reasonForStay", "reason_for_stay", 150);
+
+      // Reception may correct how many rooms and guests are actually arriving (the guest may have booked online).
+      const countInput = (value: unknown): number | null => {
+        if (!isPrivileged || value === undefined || value === null || value === "") return null;
+        const parsed = Number(value);
+        if (!Number.isInteger(parsed) || parsed < 1 || parsed > 50) throw new HttpError(400, "Rooms and guests must be whole numbers from 1 to 50.");
+        return parsed;
+      };
+      const newRoomsRequested = countInput(checkinData.roomsRequested);
+      const newGuestCount = countInput(checkinData.guestsCount);
 
       let assignedRooms: Array<{
         id: string;
@@ -1178,6 +1280,12 @@ export class BookingService {
         const normalisedIds = assignedRoomIdsInput
           .map((value: unknown) => normaliseId(value))
           .filter((value): value is string => Boolean(value));
+
+        // Reception may assign only as many rooms as were reserved, unless Settings lifts the limit for the branch.
+        const roomsBooked = newRoomsRequested ?? Math.max(Math.floor(Number(booking.rooms_requested)) || 1, 1);
+        if (isPrivileged && rules.limit_rooms && new Set(normalisedIds).size > roomsBooked) {
+          throw new HttpError(400, `This reservation is for ${roomsBooked} room${roomsBooked === 1 ? "" : "s"}. Assign no more than that, or turn off the room limit in Settings.`);
+        }
 
         assignedRooms = await Promise.all(
           normalisedIds.map(async (roomId) => {
@@ -1295,6 +1403,14 @@ export class BookingService {
           ? previousStatus
           : "IN_PROGRESS";
 
+      // The staff member who checks the guest in signs for the hotel: their saved signature is stamped on the record,
+      // when they complete the check-in or when no one has signed yet.
+      let staffSignature = (previousDetails.staff_signature as Record<string, unknown> | undefined) ?? null;
+      if (isPrivileged && user && (markAsCheckedIn || !staffSignature)) {
+        const mine = await signatureOf(user.id);
+        if (mine) staffSignature = { name: user.name, staff_id: user.id, data_url: mine, signed_at: nowIso };
+      }
+
       const nextCheckinDetails: Record<string, unknown> = {
         status: derivedStatus,
         submitted_at: previousDetails.submitted_at ?? nowIso,
@@ -1305,6 +1421,9 @@ export class BookingService {
           ? specialAssistance || null
           : null,
         other_requests: otherRequests || null,
+        arriving_from: arrivingFrom,
+        reason_for_stay: reasonForStay,
+        ...(staffSignature ? { staff_signature: staffSignature } : {}),
         guests: storedGuests,
         signature: primarySignature,
       };
@@ -1352,6 +1471,14 @@ export class BookingService {
         checkin_details: nextCheckinDetails,
         updated_at: new Date(nowIso),
       };
+
+      if (newRoomsRequested !== null && newRoomsRequested !== Number(booking.rooms_requested)) {
+        updateDoc.rooms_requested = newRoomsRequested;
+        // One requested type: its count follows. With several types there is no way to tell which one changed.
+        const categories = Object.keys((booking.preferred_categories as Record<string, unknown> | null) ?? {});
+        if (categories.length === 1) updateDoc.preferred_categories = { [categories[0]]: newRoomsRequested };
+      }
+      if (newGuestCount !== null && newGuestCount !== Number(booking.number_of_guests)) updateDoc.number_of_guests = newGuestCount;
 
       if (assignedRooms.length > 0) {
         updateDoc.room_id = assignedRooms[0].id;
@@ -1687,7 +1814,15 @@ export class BookingService {
         roomCount: Math.max(assignedRoomIds(booking).length, roomLines.length, toNumber(booking.rooms_requested), 1),
       });
     const subtotal = Math.round((roomTotal + foodTotal) * 100) / 100;
-    const grandTotal = gst.total;
+    // Extra charges (breakage, damages, and so on) are added to the bill as they are, without GST.
+    const extraCharges = (Array.isArray(booking.extra_charges) ? booking.extra_charges : []).map((entry: any) => ({
+      id: String(entry?.id ?? ""),
+      description: String(entry?.description ?? ""),
+      amount: toNumber(entry?.amount),
+      added_at: entry?.added_at ?? null,
+    }));
+    const extraTotal = Math.round(extraCharges.reduce((sum, entry) => sum + entry.amount, 0) * 100) / 100;
+    const grandTotal = Math.round((gst.total + extraTotal) * 100) / 100;
 
     if (checkout) {
       const current = String(booking.status).toUpperCase();
@@ -1808,7 +1943,10 @@ export class BookingService {
       /** Room plus food before GST. */
       subtotal,
       gst,
-      /** What the guest pays: GST included, rounded to the rupee. */
+      /** Breakage, damages and other charges added before check-out. Not taxed. */
+      extraCharges,
+      extraTotal,
+      /** What the guest pays: GST included, rounded to the rupee, plus any extra charges. */
       grandTotal,
       orders: filteredOrders.map(serialiseOrder),
     };

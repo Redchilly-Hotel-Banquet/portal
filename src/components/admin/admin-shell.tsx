@@ -26,6 +26,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { MyAccess } from "@/components/admin/my-access";
+import { MySignature } from "@/components/admin/my-signature";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useQueryClient } from "@tanstack/react-query";
 import { getAdminUser, type AdminUser } from "@/lib/authSession";
@@ -124,6 +125,7 @@ function SidebarContent({ user, scopes, pathname, onNavigate, onSignOut }: Sideb
           <ThemeToggle />
         </div>
         <MyAccess />
+        <MySignature />
         <Button type="button" variant="outline" size="sm" className="w-full justify-start" onClick={onSignOut}>
           <LogOut className="mr-2 h-4 w-4" strokeWidth={1.75} aria-hidden />
           Sign out

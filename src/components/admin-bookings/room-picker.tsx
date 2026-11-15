@@ -14,12 +14,15 @@ type Props = {
   rooms: AvailableRoom[];
   selected: string[];
   onToggle: (roomId: string, checked: boolean) => void;
+  /** Most rooms that may be selected (the number reserved); unset means no limit. */
+  limit?: number;
 };
 
 const ANY = "any";
 const typeOf = (room: AvailableRoom) => room.room_type ?? room.type ?? "Room";
 
-export function RoomPicker({ rooms, selected, onToggle }: Props) {
+export function RoomPicker({ rooms, selected, onToggle, limit }: Props) {
+  const full = limit !== undefined && selected.length >= limit;
   const [term, setTerm] = useState("");
   const [roomType, setRoomType] = useState(ANY);
   const [capacity, setCapacity] = useState(ANY);
@@ -105,10 +108,16 @@ export function RoomPicker({ rooms, selected, onToggle }: Props) {
         </span>
       </div>
 
+      {limit !== undefined ? (
+        <p className="text-xs text-muted-foreground">
+          Reserved for {limit} room{limit === 1 ? "" : "s"}{full ? ". Untick a room to pick a different one." : "."}
+        </p>
+      ) : null}
+
       {visible.length ? (
         <ul className="grid max-h-64 gap-2 overflow-y-auto rounded-md border bg-surface p-2 sm:grid-cols-2">
           {visible.map((room) => {
-            const disabled = room.isOccupiedByAnother && !room.isAssignedToBooking;
+            const disabled = (room.isOccupiedByAnother && !room.isAssignedToBooking) || (full && !selected.includes(room.id));
             const inputId = `room-${room.id}`;
             return (
               <li key={room.id}>
@@ -128,7 +137,7 @@ export function RoomPicker({ rooms, selected, onToggle }: Props) {
                     <span className="flex flex-wrap items-center gap-2 font-medium">
                       {room.code}
                       {room.isAssignedToBooking ? <Badge variant="outline">Current</Badge> : null}
-                      {disabled ? <Badge variant="destructive">Occupied</Badge> : null}
+                      {room.isOccupiedByAnother && !room.isAssignedToBooking ? <Badge variant="destructive">Occupied</Badge> : null}
                     </span>
                     <span className="block text-xs text-muted-foreground">
                       {room.room_type ?? room.type ?? "Room"}

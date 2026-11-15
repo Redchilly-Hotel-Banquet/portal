@@ -64,7 +64,7 @@ export function CheckoutDialog({ open, onOpenChange, guestName, billing, loading
         {loading || !billing ? (
           <Skeleton className="h-40 w-full" />
         ) : (
-          <GstBreakdown gst={billing.gst} />
+          <GstBreakdown gst={billing.gst} extraCharges={billing.extraCharges} />
         )}
 
         <fieldset className="space-y-3" disabled={submitting}>

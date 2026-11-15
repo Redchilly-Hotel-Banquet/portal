@@ -55,6 +55,21 @@ export function useUpdateStatus() {
   });
 }
 
+export function useExtraCharge(onDone?: () => void) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: { id: string } & ({ action: "add_extra_charge"; description: string; amount: number } | { action: "remove_extra_charge"; chargeId: string })) =>
+      apiPost<BookingResponse>("/admin/bookings/manage", payload, true),
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: BOOKINGS_KEY });
+      queryClient.invalidateQueries({ queryKey: billingKey(vars.id) });
+      toast.success(vars.action === "add_extra_charge" ? "Extra charge added to the bill" : "Extra charge removed");
+      onDone?.();
+    },
+    onError: (error) => toast.error(errorMessage(error, "Unable to update extra charges")),
+  });
+}
+
 export function useUpdateAmount(onDone?: () => void) {
   const queryClient = useQueryClient();
   return useMutation({

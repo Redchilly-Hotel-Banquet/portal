@@ -65,6 +65,10 @@ export type Booking = {
   preferred_room_type?: string | null;
   preferred_categories?: Record<string, number> | null;
   special_requests?: string | null;
+  extra_charges?: ExtraCharge[];
+  is_ota?: boolean;
+  ota_name?: string | null;
+  ota_payment_status?: string | null;
   check_in_date?: string;
   check_out_date?: string;
   nights?: number;
@@ -135,6 +139,8 @@ export type GstSummary = {
   total: number;
 };
 
+export type ExtraCharge = { id: string; description: string; amount: number; added_at?: string | null };
+
 export type BillingSummary = {
   booking: Booking;
   foodTotal: number;
@@ -148,6 +154,9 @@ export type BillingSummary = {
   /** Room plus food before GST. */
   subtotal: number;
   gst: GstSummary;
+  /** Breakage, damages and other charges added before check-out. Not taxed. */
+  extraCharges?: ExtraCharge[];
+  extraTotal?: number;
   /** Total payable: GST included and rounded to the rupee. */
   grandTotal: number;
   orders: BillingOrder[];
@@ -157,6 +166,9 @@ export type DocumentImage = { data_url: string; file_name?: string; mime_type?: 
 
 export type CheckinGuest = {
   full_name: string;
+  age?: number | null;
+  nationality?: string | null;
+  permanent_address?: string | null;
   phone?: string | null;
   document_type: string;
   document_number: string;
@@ -180,6 +192,11 @@ export type CheckinDetails = {
   needs_special_assistance?: boolean;
   special_assistance_details?: string | null;
   other_requests?: string | null;
+  /** Where the guest is travelling from, and why they are staying; both for the guest register. */
+  arriving_from?: string | null;
+  reason_for_stay?: string | null;
+  /** The hotel staff member who checked the guest in, with the signature they saved. */
+  staff_signature?: { name?: string; data_url?: string; signed_at?: string } | null;
   guests?: CheckinGuest[];
   signature?: DocumentImage | null;
   assigned_room?: AssignedRoom | null;
@@ -216,4 +233,9 @@ export type CreateBookingForm = {
   preferred_room_type: string;
   special_requests: string;
   total_amount: string;
+  is_ota: boolean;
+  ota_name: string;
+  ota_payment_status: string;
+  additional_charge: string;
+  additional_charge_reason: string;
 };

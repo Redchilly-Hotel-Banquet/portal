@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import { AlarmDialog } from "./alarm-dialog";
 import { PhoneOrderDialog } from "./phone-order-dialog";
 import { OrderCard } from "./order-card";
+import { ThermalSlip, type SlipKind } from "./thermal-slip";
 import { useOrderAlarm } from "./use-order-alarm";
 import {
   ACTIVE_STATUSES,
@@ -38,6 +39,16 @@ export function OrdersConsole() {
   const queryClient = useQueryClient();
   const audioRef = useRef<HTMLAudioElement>(null);
   const [phoneOrderOpen, setPhoneOrderOpen] = useState(false);
+  const [printing, setPrinting] = useState<{ order: AdminOrder; kind: SlipKind } | null>(null);
+  // The branch's name, address and GSTIN go on the food bill.
+  const branchesQuery = useQuery({
+    queryKey: ["order-slip-branches"],
+    queryFn: () => apiPost<{ outlets?: Array<Record<string, unknown>> }>("/admin/outlets/manage", { action: "list" }, true),
+    select: (res) => res?.outlets ?? [],
+    enabled: printing?.kind === "bill",
+    staleTime: 60_000,
+  });
+  const printingBranch = printing ? (branchesQuery.data ?? []).find((outlet) => outlet.location_key === printing.order.outlet_id) : undefined;
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ["admin-orders"],
@@ -296,6 +307,7 @@ export function OrdersConsole() {
                   now={now}
                   busy={mutation.isPending && mutation.variables?.id === order._id}
                   onStatusChange={(id, status) => mutation.mutate({ id, status })}
+                  onPrint={(target, kind) => setPrinting({ order: target, kind })}
                 />
               ))}
             </div>
@@ -314,6 +326,14 @@ export function OrdersConsole() {
         )}
       </div>
       <PhoneOrderDialog open={phoneOrderOpen} onOpenChange={setPhoneOrderOpen} />
+      {printing && (printing.kind === "kot" || !branchesQuery.isLoading) ? (
+        <ThermalSlip
+          order={printing.order}
+          kind={printing.kind}
+          branch={printingBranch ? { legal_name: String(printingBranch.legal_name || printingBranch.name || ""), gstin: String(printingBranch.gstin ?? ""), invoice_address: String(printingBranch.invoice_address || printingBranch.address || ""), invoice_phone: String(printingBranch.invoice_phone || printingBranch.contact_number || "") } : undefined}
+          onDone={() => setPrinting(null)}
+        />
+      ) : null}
     </AdminShell>
   );
 }

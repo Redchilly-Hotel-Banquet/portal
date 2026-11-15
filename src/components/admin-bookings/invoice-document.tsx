@@ -68,6 +68,8 @@ export function InvoiceDocument({ summary, settings, kind = "invoice" }: { summa
   const nights = stayNights(booking);
   const roomTotal = summary.roomTotal || bookingTotal(booking);
   const roomLines = roomChargeLines(booking, roomTotal, nights);
+  const extraCharges = summary.extraCharges ?? [];
+  const extraTotal = summary.extraTotal ?? 0;
   const payments = booking.payments ?? [];
   const balanceDue = Math.max(Math.round((summary.grandTotal - payments.reduce((sum, payment) => sum + payment.amount, 0)) * 100) / 100, 0);
   const checkin = booking.checkin_details;
@@ -88,17 +90,30 @@ export function InvoiceDocument({ summary, settings, kind = "invoice" }: { summa
     Boolean(otherRequests);
   const showRequests = Boolean(specialRequests) || hasCheckinRequests;
   const requestsShown = (show.request_special && Boolean(specialRequests)) || (show.request_arrival && Boolean(checkin?.expected_arrival_time)) || (show.request_assistance && hasAssistanceAnswer) || (show.request_other && Boolean(otherRequests));
+  // Guest register: the booking's own contact stands in until check-in has recorded who actually arrived.
+  const registerGuests = guests.length > 0 ? guests : [{ full_name: booking.guest_name ?? "", phone: booking.guest_phone } as (typeof guests)[number]];
+  const arrivingFrom = checkin?.arriving_from?.trim();
+  const reasonForStay = checkin?.reason_for_stay?.trim();
+  const arrival = booking.checked_in_at || checkin?.expected_arrival_time || "";
+  const DASH = "-";
+  const issuedFields = <Field label="Date">{formatDate(new Date())}</Field>;
   const checkinDate = booking.checked_in_at ? formatDate(booking.checked_in_at) : "";
 
   return (
     <article className="invoice-sheet bg-white p-8 text-[12px] leading-snug text-neutral-900">
       <header className="flex items-start justify-between gap-6 border-b border-neutral-300 pb-3">
-        <div>
+        <div className="flex items-start gap-3">
+          {show.logo ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src="/logo.jpeg" alt={SITE.name} className="h-14 w-14 shrink-0 rounded-sm object-cover" />
+          ) : null}
+          <div>
           {show.heading_name ? <h2 className="font-display text-xl leading-tight text-neutral-900">{issuer.name}</h2> : null}
           {show.heading_name && issuer.descriptor ? <p className="text-neutral-600">{issuer.descriptor}</p> : null}
           {show.branch_address ? <p className="mt-1 max-w-xs whitespace-pre-line text-neutral-600">{issuer.address}</p> : null}
           {contactLine ? <p className="text-neutral-600">{contactLine}</p> : null}
           {show.gstin && issuer.gstin ? <p className="mt-0.5 font-medium text-neutral-800">GSTIN: <span className="font-mono">{issuer.gstin}</span></p> : null}
+          </div>
         </div>
         <div className="text-right">
           {show.heading_code ? <p className={LABEL}>{DOCUMENT_LABEL[kind].heading}</p> : null}
@@ -138,6 +153,61 @@ export function InvoiceDocument({ summary, settings, kind = "invoice" }: { summa
         </dl>
         <Gap lines={cfg.spacers.after_guest} />
       </section>
+      ) : null}
+
+      {show.register ? (
+        <section className="break-inside-avoid border-b border-neutral-300 py-3">
+          <p className={LABEL}>Guest register</p>
+          <dl className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-2">
+            {issuedFields}
+            {show.reg_arriving_from ? <Field label="Arriving from">{arrivingFrom || DASH}</Field> : null}
+            {show.reg_arrival ? <Field label="Date and time of arrival">{arrival ? formatDateTime(arrival) : DASH}</Field> : null}
+            {show.reg_reason ? <Field label="Reason for stay">{reasonForStay || DASH}</Field> : null}
+            {show.reg_duration ? (
+              <Field label="Duration of stay">
+                {nights} night{nights === 1 ? "" : "s"} ({formatDate(booking.check_in_date)} to {formatDate(booking.check_out_date)})
+              </Field>
+            ) : null}
+            {show.reg_room ? <Field label="Room number">{roomsAssigned.length > 0 ? roomsAssigned.map((room) => room.code).join(", ") : DASH}</Field> : null}
+          </dl>
+          {registerGuests.map((guest, index) => (
+            <dl key={`${guest.full_name}-${index}`} className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 border-t border-neutral-200 pt-2">
+              <Field label={registerGuests.length > 1 ? `Name (guest ${index + 1})` : "Name"}>{guest.full_name || DASH}</Field>
+              <Field label="Mobile">{formatPhone(guest.phone ?? (index === 0 ? booking.guest_phone : "")) || DASH}</Field>
+              {show.reg_age ? <Field label="Age">{guest.age != null ? guest.age : DASH}</Field> : null}
+              {show.reg_nationality ? <Field label="Nationality">{guest.nationality || DASH}</Field> : null}
+              {show.reg_address ? <Field label="Permanent address" className="col-span-2">{guest.permanent_address || DASH}</Field> : null}
+            </dl>
+          ))}
+          {show.reg_guest_signature || show.reg_manager_signature ? (
+            <div className="mt-4 grid grid-cols-2 gap-x-8 break-inside-avoid">
+              {show.reg_guest_signature ? (
+                <div>
+                  {registerGuests.length > 0 && registerGuests[0].signature_image?.data_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={registerGuests[0].signature_image.data_url} alt={`Signature of ${registerGuests[0].full_name}`} className="block w-full border-b border-neutral-500 bg-white object-contain object-left" style={{ height: `${cfg.signature_height_mm}mm` }} />
+                  ) : (
+                    <div className="border-b border-neutral-500" style={{ height: `${cfg.signature_height_mm}mm` }} />
+                  )}
+                  <p className="mt-0.5 text-[10px] text-neutral-600">Signature of guest</p>
+                </div>
+              ) : <span />}
+              {show.reg_manager_signature ? (
+                <div>
+                  {checkin?.staff_signature?.data_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={checkin.staff_signature.data_url} alt={`Signature of ${checkin.staff_signature.name ?? "hotel staff"}`} className="block w-full border-b border-neutral-500 bg-white object-contain object-left" style={{ height: `${cfg.signature_height_mm}mm` }} />
+                  ) : (
+                    <div className="border-b border-neutral-500" style={{ height: `${cfg.signature_height_mm}mm` }} />
+                  )}
+                  <p className="mt-0.5 text-[10px] text-neutral-600">
+                    Signature of manager or authorised person{checkin?.staff_signature?.name ? `: ${checkin.staff_signature.name}` : ""}
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </section>
       ) : null}
 
       {show.room_details && roomRows.length > 0 && roomColumns > 0 ? (
@@ -298,6 +368,22 @@ export function InvoiceDocument({ summary, settings, kind = "invoice" }: { summa
             ) : null}
             </>
             ) : null}
+
+            {extraCharges.length > 0 ? (
+            <>
+            <tr className="break-inside-avoid">
+              <td colSpan={chargeColumns} className="pb-0.5 pt-3 font-semibold">Extra charges (no GST)</td>
+            </tr>
+            {extraCharges.map((charge) => (
+              <tr key={charge.id} className="break-inside-avoid align-top">
+                <td className="py-px pl-3">{charge.description}</td>
+                {show.charge_qty ? <td /> : null}
+                {show.charge_rate ? <td /> : null}
+                <td className="py-px text-right tabular-nums">{formatINR(charge.amount)}</td>
+              </tr>
+            ))}
+            </>
+            ) : null}
           </tbody>
           {show.charges_total ? (
           <tfoot>
@@ -396,6 +482,12 @@ export function InvoiceDocument({ summary, settings, kind = "invoice" }: { summa
                   {summary.gst.roundOff > 0 ? "+" : "-"}
                   {formatINR(Math.abs(summary.gst.roundOff))}
                 </td>
+              </tr>
+            ) : null}
+            {extraCharges.length > 0 ? (
+              <tr>
+                <td className="py-0.5">Add: Extra charges (no GST)</td>
+                <td className="py-0.5 text-right tabular-nums">{formatINR(extraTotal)}</td>
               </tr>
             ) : null}
             {show.pay_total ? (

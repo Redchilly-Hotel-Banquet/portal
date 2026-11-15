@@ -1,7 +1,9 @@
 "use client";
 
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Minus, Plus } from "lucide-react";
+import { apiPost } from "@/lib/apiClient";
 import { InvoiceDocument } from "@/components/admin-bookings/invoice-document";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,7 +55,19 @@ export function InvoicePreview({ settings, issuer, guests, documentFor, kind = "
   const measure = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(0.5);
   const [pages, setPages] = useState<Page[]>([{ start: 0, end: 0 }]);
-  const summary = useMemo(() => sampleSummary(guests, types, issuer, documentFor), [guests, types, issuer, documentFor]);
+  // The preview shows the signature this account saved under "My signature", as it will print on bookings they check in.
+  const mine = useQuery({
+    queryKey: ["my-signature"],
+    queryFn: () => apiPost<{ signature: string | null; name: string }>("/admin/me/signature", { action: "get" }, true),
+    staleTime: 60_000,
+  });
+  const summary = useMemo(() => {
+    const sample = sampleSummary(guests, types, issuer, documentFor);
+    if (mine.data?.signature && sample.booking.checkin_details) {
+      sample.booking.checkin_details.staff_signature = { name: mine.data.name, data_url: mine.data.signature };
+    }
+    return sample;
+  }, [guests, types, issuer, documentFor, mine.data]);
 
   const sheetW = paper.width * PX_PER_MM;
   const contentW = (paper.width - 2 * margin) * PX_PER_MM;

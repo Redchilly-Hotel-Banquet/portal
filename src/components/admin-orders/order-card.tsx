@@ -1,6 +1,6 @@
 "use client";
 
-import { Clock, Phone, Repeat2 } from "lucide-react";
+import { Clock, Phone, Printer, Receipt, Repeat2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge, statusLabel } from "@/components/admin/status-badge";
@@ -22,6 +22,7 @@ type OrderCardProps = {
   now: number;
   busy: boolean;
   onStatusChange: (id: string, status: OrderStatus) => void;
+  onPrint: (order: AdminOrder, kind: "kot" | "bill") => void;
 };
 
 const elapsedMinutes = (createdAt: string, now: number) => {
@@ -32,7 +33,7 @@ const elapsedMinutes = (createdAt: string, now: number) => {
 const formatElapsed = (mins: number) =>
   mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)} h ${String(mins % 60).padStart(2, "0")} min`;
 
-export function OrderCard({ order, isRepeat, now, busy, onStatusChange }: OrderCardProps) {
+export function OrderCard({ order, isRepeat, now, busy, onStatusChange, onPrint }: OrderCardProps) {
   const status = order.status as OrderStatus;
   const next = NEXT_STEP[status];
   const active = status !== "DELIVERED";
@@ -115,7 +116,15 @@ export function OrderCard({ order, isRepeat, now, busy, onStatusChange }: OrderC
           <span className="text-muted-foreground">Total </span>
           <Money value={order.total} className="font-semibold" />
         </p>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => onPrint(order, "kot")}>
+            <Printer className="mr-2 h-4 w-4" strokeWidth={1.75} aria-hidden />
+            KOT
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => onPrint(order, "bill")}>
+            <Receipt className="mr-2 h-4 w-4" strokeWidth={1.75} aria-hidden />
+            Bill
+          </Button>
           <Select value={order.status} onValueChange={(v) => onStatusChange(order._id, v as OrderStatus)} disabled={busy}>
             <SelectTrigger className="h-9 w-32" aria-label={`Set status for order ${shortId(order._id)}`}>
               <SelectValue />
