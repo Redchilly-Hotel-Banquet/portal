@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 import { isGoogleAuthEnabled } from "@/server/env";
 import {
+  GOOGLE_APP_COOKIE,
   GOOGLE_NEXT_COOKIE,
   GOOGLE_STATE_COOKIE,
   appOrigin,
@@ -37,5 +38,7 @@ export function GET(request: Request) {
   };
   response.cookies.set(GOOGLE_STATE_COOKIE, state, cookie);
   response.cookies.set(GOOGLE_NEXT_COOKIE, next, cookie);
+  if (new URL(request.url).searchParams.get("app") === "1") response.cookies.set(GOOGLE_APP_COOKIE, "1", cookie);
+  else response.cookies.delete({ name: GOOGLE_APP_COOKIE, path: "/api/auth/google" });
   return response;
 }

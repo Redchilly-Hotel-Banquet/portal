@@ -68,6 +68,14 @@ public class MainActivity extends Activity {
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
                 String host = uri.getHost();
+                // Google refuses sign-in inside a WebView, so it runs in the browser and comes back through redchilly://open.
+                if (HOST.equals(host) && uri.getPath() != null && uri.getPath().equals("/api/auth/google")) {
+                    try {
+                        startActivity(new Intent(Intent.ACTION_VIEW, uri.buildUpon().appendQueryParameter("app", "1").build()));
+                    } catch (ActivityNotFoundException ignored) {
+                    }
+                    return true;
+                }
                 if (("https".equals(uri.getScheme()) || "http".equals(uri.getScheme())) && host != null && (host.equals(HOST) || host.endsWith("." + HOST))) {
                     return false;
                 }
@@ -142,6 +150,10 @@ public class MainActivity extends Activity {
     /** A tapped order notification opens the Orders page; otherwise the home page. */
     private String opened(Intent intent) {
         String url = intent == null ? null : intent.getStringExtra("open");
+        // The finished Google sign-in: redchilly://open?u=<the completion page on redchilly.in>.
+        if (url == null && intent != null && intent.getData() != null && "redchilly".equals(intent.getData().getScheme())) {
+            url = intent.getData().getQueryParameter("u");
+        }
         return url != null && url.startsWith(HOME) ? url : HOME;
     }
 
@@ -149,7 +161,7 @@ public class MainActivity extends Activity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        if (intent.getStringExtra("open") != null) web.loadUrl(opened(intent));
+        if (intent.getStringExtra("open") != null || intent.getData() != null) web.loadUrl(opened(intent));
     }
 
     @Override

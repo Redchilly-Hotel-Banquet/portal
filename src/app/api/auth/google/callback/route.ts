@@ -2,8 +2,10 @@ import { NextResponse } from "next/server";
 import { HttpError } from "@/server/httpError";
 import { isGoogleAuthEnabled } from "@/server/env";
 import {
+  GOOGLE_APP_COOKIE,
   GOOGLE_NEXT_COOKIE,
   GOOGLE_STATE_COOKIE,
+  appHandoffHtml,
   appOrigin,
   completeUrl,
   exchangeCode,
@@ -19,8 +21,14 @@ export async function GET(request: Request) {
   const origin = appOrigin(request);
   const next = safeNext(decodeURIComponent(readCookie(request, GOOGLE_NEXT_COOKIE) ?? ""));
 
+  const fromApp = readCookie(request, GOOGLE_APP_COOKIE) === "1";
+
   const finish = (params: Record<string, string>) => {
-    const response = NextResponse.redirect(completeUrl(origin, { ...params, next }));
+    const target = completeUrl(origin, { ...params, next });
+    const response = fromApp
+      ? new NextResponse(appHandoffHtml(target), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } })
+      : NextResponse.redirect(target);
+    response.cookies.delete({ name: GOOGLE_APP_COOKIE, path: "/api/auth/google" });
     response.cookies.delete({ name: GOOGLE_STATE_COOKIE, path: "/api/auth/google" });
     response.cookies.delete({ name: GOOGLE_NEXT_COOKIE, path: "/api/auth/google" });
     return response;
